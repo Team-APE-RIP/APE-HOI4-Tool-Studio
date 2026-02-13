@@ -1,0 +1,28 @@
+<RCC>
+    <qresource prefix="/">
+        <file>app.ico</file>
+        <file>settings.png</file>
+        <file>config.png</file>
+        <file>localization/en_US/MainWindow.json</file>
+        <file>localization/en_US/SettingsPage.json</file>
+        <file>localization/en_US/ConfigPage.json</file>
+        <file>localization/en_US/SetupDialog.json</file>
+        <file>localization/en_US/Common.json</file>
+        <file>localization/en_US/Error.json</file>
+        <file>localization/en_US/ToolsPage.json</file>
+        <file>localization/zh_CN/MainWindow.json</file>
+        <file>localization/zh_CN/SettingsPage.json</file>
+        <file>localization/zh_CN/ConfigPage.json</file>
+        <file>localization/zh_CN/SetupDialog.json</file>
+        <file>localization/zh_CN/Common.json</file>
+        <file>localization/zh_CN/Error.json</file>
+        <file>localization/zh_CN/ToolsPage.json</file>
+        <file>localization/zh_TW/MainWindow.json</file>
+        <file>localization/zh_TW/SettingsPage.json</file>
+        <file>localization/zh_TW/ConfigPage.json</file>
+        <file>localization/zh_TW/SetupDialog.json</file>
+        <file>localization/zh_TW/Common.json</file>
+        <file>localization/zh_TW/Error.json</file>
+        <file>localization/zh_TW/ToolsPage.json</file>
+    </qresource>
+</RCC>

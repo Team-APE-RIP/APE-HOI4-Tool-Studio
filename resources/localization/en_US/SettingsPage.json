@@ -1,0 +1,23 @@
+{
+    "SettingsTitle": "Settings",
+    "Group_Interface": "Interface",
+    "Group_Debug": "Debug",
+    "Group_About": "About",
+    "Theme_Title": "Theme Mode",
+    "Theme_Desc": "Select application appearance",
+    "Lang_Title": "Language",
+    "Lang_Desc": "Restart required to apply changes",
+    "Debug_Title": "Show Usage Overlay",
+    "Debug_Desc": "Show memory usage overlay",
+    "Log_Title": "Logs",
+    "Log_Desc": "Open application logs directory",
+    "Log_Btn": "Open Logs",
+    "Sidebar_Title": "Compact Sidebar",
+    "Sidebar_Desc": "Auto-collapse sidebar",
+    "AboutHeader": "About",
+    "GithubLink": "GitHub Repository",
+    "OpenSourceBtn": "Open Source Libraries ▼",
+    "Theme_System": "System",
+    "Theme_Light": "Light",
+    "Theme_Dark": "Dark"
+}

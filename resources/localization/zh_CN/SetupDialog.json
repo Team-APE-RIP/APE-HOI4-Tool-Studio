@@ -1,0 +1,14 @@
+{
+    "WindowTitle": "APE HOI4 Tool Studio - 配置",
+    "TitleLabel": "欢迎使用 APE HOI4 Tool Studio",
+    "GameLabel": "HOI4 游戏目录:",
+    "ModLabel": "Mod 目录:",
+    "GamePlaceholder": "选择钢铁雄心4安装文件夹...",
+    "ModPlaceholder": "选择你的 Mod 文件夹...",
+    "ConfirmButton": "启动工作室",
+    "BrowseButton": "浏览",
+    "ErrorTitle": "错误",
+    "ErrorMsg": "请选择游戏和 Mod 目录。",
+    "SelectGameDir": "选择游戏目录",
+    "SelectModDir": "选择 Mod 目录"
+}

@@ -1,0 +1,23 @@
+{
+    "SettingsTitle": "应用设置",
+    "Group_Interface": "界面",
+    "Group_Debug": "调试",
+    "Group_About": "关于",
+    "Theme_Title": "主题模式",
+    "Theme_Desc": "选择应用外观",
+    "Lang_Title": "语言",
+    "Lang_Desc": "重启后生效",
+    "Debug_Title": "显示占用内容",
+    "Debug_Desc": "显示内存占用悬浮窗",
+    "Log_Title": "日志",
+    "Log_Desc": "打开应用日志目录",
+    "Log_Btn": "打开日志",
+    "Sidebar_Title": "紧凑侧边栏",
+    "Sidebar_Desc": "自动收起侧边栏",
+    "AboutHeader": "关于",
+    "GithubLink": "GitHub 仓库",
+    "OpenSourceBtn": "开放源代码库 ▼",
+    "Theme_System": "跟随系统",
+    "Theme_Light": "浅色模式",
+    "Theme_Dark": "深色模式"
+}

@@ -1,0 +1,10 @@
+{
+    "ConfigTitle": "配置",
+    "Group_Directories": "目錄",
+    "GameDir_Title": "遊戲目錄",
+    "GameDir_Desc": "鋼鐵雄心4安裝路徑",
+    "ReselectBtn": "重新選擇",
+    "ModDir_Title": "當前 Mod",
+    "ModDir_Desc": "已選 Mod 路徑",
+    "CloseModBtn": "關閉當前 Mod"
+}

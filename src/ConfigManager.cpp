@@ -1,0 +1,145 @@
+#include "ConfigManager.h"
+#include "Logger.h"
+#include <QStandardPaths>
+#include <QFile>
+#include <QJsonDocument>
+#include <QDebug>
+
+ConfigManager& ConfigManager::instance() {
+    static ConfigManager instance;
+    return instance;
+}
+
+ConfigManager::ConfigManager() {
+    m_language = "English";
+    m_theme = Theme::System;
+    m_debugMode = false;
+    m_sidebarCompactMode = false;
+    loadConfig();
+}
+
+QString ConfigManager::getGlobalConfigPath() const {
+    QString tempPath = QStandardPaths::writableLocation(QStandardPaths::TempLocation);
+    QDir dir(tempPath);
+    if (!dir.exists("APE-HOI4-Tool-Studio")) {
+        dir.mkdir("APE-HOI4-Tool-Studio");
+    }
+    return dir.filePath("APE-HOI4-Tool-Studio/config.json");
+}
+
+QString ConfigManager::getModConfigPath() const {
+    QString tempPath = QStandardPaths::writableLocation(QStandardPaths::TempLocation);
+    QDir dir(tempPath);
+    if (!dir.exists("APE-HOI4-Tool-Studio")) {
+        dir.mkdir("APE-HOI4-Tool-Studio");
+    }
+    return dir.filePath("APE-HOI4-Tool-Studio/mod_config.json");
+}
+
+void ConfigManager::loadConfig() {
+    QFile file(getGlobalConfigPath());
+    if (file.open(QIODevice::ReadOnly)) {
+        QByteArray data = file.readAll();
+        QJsonDocument doc = QJsonDocument::fromJson(data);
+        QJsonObject obj = doc.object();
+
+        if (obj.contains("gamePath")) m_gamePath = obj["gamePath"].toString();
+        if (obj.contains("language")) m_language = obj["language"].toString();
+        if (obj.contains("theme")) m_theme = static_cast<Theme>(obj["theme"].toInt());
+        if (obj.contains("debugMode")) m_debugMode = obj["debugMode"].toBool();
+        if (obj.contains("sidebarCompact")) m_sidebarCompactMode = obj["sidebarCompact"].toBool();
+        file.close();
+    }
+
+    QFile modFile(getModConfigPath());
+    if (modFile.open(QIODevice::ReadOnly)) {
+        QByteArray data = modFile.readAll();
+        QJsonDocument doc = QJsonDocument::fromJson(data);
+        QJsonObject obj = doc.object();
+
+        if (obj.contains("modPath")) m_modPath = obj["modPath"].toString();
+        modFile.close();
+    }
+}
+
+void ConfigManager::saveConfig() {
+    QJsonObject obj;
+    obj["gamePath"] = m_gamePath;
+    obj["language"] = m_language;
+    obj["theme"] = static_cast<int>(m_theme);
+    obj["debugMode"] = m_debugMode;
+    obj["sidebarCompact"] = m_sidebarCompactMode;
+
+    QJsonDocument doc(obj);
+    QFile file(getGlobalConfigPath());
+    if (file.open(QIODevice::WriteOnly)) {
+        file.write(doc.toJson());
+    }
+}
+
+void ConfigManager::saveModConfig() {
+    QJsonObject obj;
+    obj["modPath"] = m_modPath;
+
+    QJsonDocument doc(obj);
+    QFile file(getModConfigPath());
+    if (file.open(QIODevice::WriteOnly)) {
+        file.write(doc.toJson());
+    }
+}
+
+QString ConfigManager::getGamePath() const { return m_gamePath; }
+void ConfigManager::setGamePath(const QString& path) { 
+    if (m_gamePath != path) {
+        Logger::instance().logInfo("Config", "Game path changed to: " + path);
+        m_gamePath = path; 
+        saveConfig(); 
+    }
+}
+
+QString ConfigManager::getLanguage() const { return m_language; }
+void ConfigManager::setLanguage(const QString& lang) { 
+    if (m_language != lang) {
+        Logger::instance().logInfo("Config", "Language changed to: " + lang);
+        m_language = lang; 
+        saveConfig(); 
+        emit languageChanged(lang);
+    }
+}
+
+ConfigManager::Theme ConfigManager::getTheme() const { return m_theme; }
+void ConfigManager::setTheme(Theme theme) { 
+    if (m_theme != theme) {
+        m_theme = theme; 
+        saveConfig(); 
+        emit themeChanged(theme);
+    }
+}
+
+bool ConfigManager::getDebugMode() const { return m_debugMode; }
+void ConfigManager::setDebugMode(bool enabled) { m_debugMode = enabled; saveConfig(); }
+
+bool ConfigManager::getSidebarCompactMode() const { return m_sidebarCompactMode; }
+void ConfigManager::setSidebarCompactMode(bool enabled) { m_sidebarCompactMode = enabled; saveConfig(); }
+
+QString ConfigManager::getModPath() const { return m_modPath; }
+void ConfigManager::setModPath(const QString& path) { 
+    if (m_modPath != path) {
+        Logger::instance().logInfo("Config", "Mod path changed to: " + path);
+        m_modPath = path; 
+        saveModConfig(); 
+    }
+}
+
+void ConfigManager::clearModPath() {
+    m_modPath = "";
+    saveModConfig();
+}
+
+bool ConfigManager::isFirstRun() const {
+    return m_gamePath.isEmpty();
+}
+
+bool ConfigManager::hasModSelected() const {
+    return !m_modPath.isEmpty();
+}

@@ -1,0 +1,10 @@
+{
+    "ConfigTitle": "Configuration",
+    "Group_Directories": "Directories",
+    "GameDir_Title": "Game Directory",
+    "GameDir_Desc": "Path to HOI4 installation",
+    "ReselectBtn": "Reselect",
+    "ModDir_Title": "Current Mod",
+    "ModDir_Desc": "Path to selected mod",
+    "CloseModBtn": "Close Current Mod"
+}

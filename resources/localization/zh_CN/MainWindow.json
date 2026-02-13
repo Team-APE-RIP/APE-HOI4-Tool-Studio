@@ -1,0 +1,14 @@
+{
+    "Settings": "设置",
+    "Config": "配置",
+    "Tools": "工具",
+    "Title": "APE\nHOI4 Tool Studio",
+    "RestartTitle": "需要重启",
+    "RestartMsg": "请重启应用程序以完全应用语言更改。",
+    "ModClosedTitle": "Mod 已关闭",
+    "ModClosedMsg": "当前 Mod 已关闭。请重启以选择新 Mod。",
+    "CloseConfirmTitle": "关闭应用",
+    "CloseConfirmMsg": "当前有工具正在运行。确定要关闭应用程序吗？未保存的更改可能会丢失。",
+    "SwitchToolTitle": "切换工具",
+    "SwitchToolMsg": "当前有工具正在运行。确定要切换到另一个工具吗？未保存的更改可能会丢失。"
+}

@@ -1,0 +1,14 @@
+{
+    "Settings": "Settings",
+    "Config": "Configuration",
+    "Tools": "Tools",
+    "Title": "APE\nHOI4 Tool Studio",
+    "RestartTitle": "Restart Required",
+    "RestartMsg": "Please restart the application to apply language changes fully.",
+    "ModClosedTitle": "Mod Closed",
+    "ModClosedMsg": "Current mod has been closed. Please restart to select a new mod.",
+    "CloseConfirmTitle": "Close Application",
+    "CloseConfirmMsg": "A tool is currently running. Are you sure you want to close the application? Unsaved changes may be lost.",
+    "SwitchToolTitle": "Switch Tool",
+    "SwitchToolMsg": "A tool is currently running. Are you sure you want to switch to another tool? Unsaved changes may be lost."
+}

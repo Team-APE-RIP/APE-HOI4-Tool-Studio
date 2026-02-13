@@ -1,0 +1,10 @@
+{
+    "ConfigTitle": "配置",
+    "Group_Directories": "目录",
+    "GameDir_Title": "游戏目录",
+    "GameDir_Desc": "钢铁雄心4安装路径",
+    "ReselectBtn": "重新选择",
+    "ModDir_Title": "当前 Mod",
+    "ModDir_Desc": "已选 Mod 路径",
+    "CloseModBtn": "关闭当前 Mod"
+}

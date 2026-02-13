@@ -1,0 +1,14 @@
+{
+    "WindowTitle": "APE HOI4 Tool Studio - Configuration",
+    "TitleLabel": "Welcome to APE HOI4 Tool Studio",
+    "GameLabel": "HOI4 Game Directory:",
+    "ModLabel": "Mod Directory:",
+    "GamePlaceholder": "Select Hearts of Iron IV installation folder...",
+    "ModPlaceholder": "Select your mod folder...",
+    "ConfirmButton": "Start Studio",
+    "BrowseButton": "Browse",
+    "ErrorTitle": "Error",
+    "ErrorMsg": "Please select both Game and Mod directories.",
+    "SelectGameDir": "Select Game Directory",
+    "SelectModDir": "Select Mod Directory"
+}

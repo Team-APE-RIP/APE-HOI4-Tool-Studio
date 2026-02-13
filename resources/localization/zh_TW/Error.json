@@ -1,0 +1,9 @@
+{
+    "GamePathInvalid": "遊戲目錄無效。",
+    "ModPathInvalid": "Mod 目錄無效。",
+    "PathNotExist": "資料夾不存在。",
+    "Hoi4NotFound": "未找到 hoi4.exe。",
+    "ModNameInvalid": "資料夾名稱不能為 'mod'。",
+    "NoModFile": "未找到 .mod 文件。",
+    "EmptyPaths": "請選擇遊戲和 Mod 目錄。"
+}

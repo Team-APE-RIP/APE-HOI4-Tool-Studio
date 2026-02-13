@@ -1,0 +1,9 @@
+{
+    "GamePathInvalid": "Game directory invalid.",
+    "ModPathInvalid": "Mod directory invalid.",
+    "PathNotExist": "Directory does not exist.",
+    "Hoi4NotFound": "hoi4.exe not found.",
+    "ModNameInvalid": "Directory name cannot be 'mod'.",
+    "NoModFile": "No .mod file found.",
+    "EmptyPaths": "Please select both Game and Mod directories."
+}
