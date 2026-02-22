@@ -61,6 +61,22 @@ void ToolManager::loadTools() {
             if (plugin) {
                 ToolInterface *tool = qobject_cast<ToolInterface *>(plugin);
                 if (tool) {
+                    // Inject metadata
+                    QJsonObject metaData = loader.metaData().value("MetaData").toObject();
+                    tool->setMetaData(metaData);
+
+                    // Version Check
+                    QString appVersion = APP_VERSION;
+                    QString requiredVersion = tool->compatibleVersion();
+                    if (appVersion != requiredVersion) {
+                        Logger::instance().logWarning("ToolManager", 
+                            QString("Version mismatch for tool %1: Requires App v%2, Current App v%3")
+                            .arg(tool->id()).arg(requiredVersion).arg(appVersion));
+                    } else {
+                        Logger::instance().logInfo("ToolManager", 
+                            QString("Tool %1 version check passed (v%2)").arg(tool->id()).arg(requiredVersion));
+                    }
+
                     // Check if already loaded (by ID)
                     if (m_toolMap.contains(tool->id())) {
                         Logger::instance().logWarning("ToolManager", "Duplicate tool ID found: " + tool->id() + ". Skipping " + fileName);

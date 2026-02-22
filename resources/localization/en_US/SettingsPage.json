@@ -12,6 +12,8 @@
     "Log_Title": "Logs",
     "Log_Desc": "Open application logs directory",
     "Log_Btn": "Open Logs",
+    "MaxLogs_Title": "Max Log Files",
+    "MaxLogs_Desc": "Number of log files to keep",
     "Sidebar_Title": "Compact Sidebar",
     "Sidebar_Desc": "Auto-collapse sidebar",
     "AboutHeader": "About",

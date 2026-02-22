@@ -5,6 +5,7 @@
 #include <QWidget>
 #include <QString>
 #include <QIcon>
+#include <QJsonObject>
 
 class ToolInterface {
 public:
@@ -15,8 +16,12 @@ public:
     virtual QString name() const = 0;
     virtual QString description() const = 0;
     virtual QString version() const = 0;
+    virtual QString compatibleVersion() const = 0; // New: Required main program version
     virtual QString author() const = 0;
     
+    // Metadata Injection
+    virtual void setMetaData(const QJsonObject& metaData) = 0;
+
     // Resources
     virtual QIcon icon() const = 0;
     
@@ -26,6 +31,7 @@ public:
     
     // UI
     virtual QWidget* createWidget(QWidget* parent = nullptr) = 0;
+    virtual QWidget* createSidebarWidget(QWidget* parent = nullptr) { return nullptr; }
     
     // Localization
     virtual void loadLanguage(const QString& lang) = 0;

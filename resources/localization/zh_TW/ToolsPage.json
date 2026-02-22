@@ -1,3 +1,7 @@
 {
-    "Title": "工具"
+    "Title": "工具",
+    "VersionMismatch": "版本不匹配！",
+    "RequiresApp": "需要主程式 v%1",
+    "CurrentApp": "當前主程式 v%2",
+    "MismatchWarning": "這可能會導致問題。"
 }

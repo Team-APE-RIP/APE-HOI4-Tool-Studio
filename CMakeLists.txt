@@ -6,6 +6,9 @@ set(CMAKE_CXX_STANDARD 17)
 set(CMAKE_CXX_STANDARD_REQUIRED ON)
 set(CMAKE_WINDOWS_EXPORT_ALL_SYMBOLS ON) # For plugins to link to core
 
+# Pass version to C++
+# add_definitions(-DAPP_VERSION="${PROJECT_VERSION}")
+
 # 添加这一行，告诉编译器在 src 目录下查找头文件
 include_directories(${CMAKE_CURRENT_SOURCE_DIR}/src)
 
@@ -40,6 +43,8 @@ set(CORE_SOURCES
     src/FileManager.h
     src/RecursiveFileSystemWatcher.cpp
     src/RecursiveFileSystemWatcher.h
+    src/TagManager.cpp
+    src/TagManager.h
     src/ToolInterface.h
     src/ToolManager.cpp
     src/ToolManager.h
@@ -48,6 +53,7 @@ set(CORE_SOURCES
 # Create Core Library
 add_library(APEHOI4Core SHARED ${CORE_SOURCES})
 target_link_libraries(APEHOI4Core PRIVATE Qt6::Core Qt6::Gui Qt6::Widgets)
+target_compile_definitions(APEHOI4Core PUBLIC APP_VERSION="${PROJECT_VERSION}")
 
 # Main Application Sources
 set(APP_SOURCES
@@ -115,3 +121,36 @@ add_custom_command(TARGET FileManagerTool POST_BUILD
     "${CMAKE_CURRENT_SOURCE_DIR}/src/tools/FileManagerTool/cover.png"
     "$<TARGET_FILE_DIR:FileManagerTool>/cover.png"
 )
+
+# --- FlagManager Tool ---
+set(FLAGMANAGER_TOOL_SOURCES
+    src/tools/FlagManagerTool/FlagManagerTool.cpp
+    src/tools/FlagManagerTool/FlagManagerTool.h
+)
+
+add_library(FlagManagerTool SHARED ${FLAGMANAGER_TOOL_SOURCES})
+target_link_libraries(FlagManagerTool PRIVATE Qt6::Core Qt6::Gui Qt6::Widgets APEHOI4Core)
+
+set_target_properties(FlagManagerTool PROPERTIES 
+    LIBRARY_OUTPUT_DIRECTORY "${CMAKE_BINARY_DIR}/tools/FlagManagerTool"
+    RUNTIME_OUTPUT_DIRECTORY "${CMAKE_BINARY_DIR}/tools/FlagManagerTool"
+)
+
+add_custom_command(TARGET FlagManagerTool POST_BUILD
+    COMMAND ${CMAKE_COMMAND} -E copy
+    "${CMAKE_CURRENT_SOURCE_DIR}/src/tools/FlagManagerTool/metadata.json"
+    "$<TARGET_FILE_DIR:FlagManagerTool>/metadata.json"
+)
+
+add_custom_command(TARGET FlagManagerTool POST_BUILD
+    COMMAND ${CMAKE_COMMAND} -E copy_directory
+    "${CMAKE_CURRENT_SOURCE_DIR}/src/tools/FlagManagerTool/localization"
+    "$<TARGET_FILE_DIR:FlagManagerTool>/localization"
+)
+
+# Copy cover image if exists (optional for now)
+# add_custom_command(TARGET FlagManagerTool POST_BUILD
+#     COMMAND ${CMAKE_COMMAND} -E copy
+#     "${CMAKE_CURRENT_SOURCE_DIR}/src/tools/FlagManagerTool/cover.png"
+#     "$<TARGET_FILE_DIR:FlagManagerTool>/cover.png"
+# )

@@ -82,37 +82,40 @@ void FileManager::onDebounceTimerTimeout() {
 void FileManager::onScanFinished() {
     ScanResult result = m_futureWatcher->result();
     
-    QMutexLocker locker(&m_mutex);
-    
-    // Compare with old files to log changes
-    for (auto it = result.fileTimes.begin(); it != result.fileTimes.end(); ++it) {
-        const QString& path = it.key();
-        const QDateTime& time = it.value();
+    {
+        QMutexLocker locker(&m_mutex);
         
-        if (!m_fileTimes.contains(path)) {
-            Logger::instance().logInfo("FileManager", "File added: " + path);
-        } else if (m_fileTimes[path] != time) {
-            Logger::instance().logInfo("FileManager", "File modified: " + path);
+        // Compare with old files to log changes
+        for (auto it = result.fileTimes.begin(); it != result.fileTimes.end(); ++it) {
+            const QString& path = it.key();
+            const QDateTime& time = it.value();
+            
+            if (!m_fileTimes.contains(path)) {
+                Logger::instance().logInfo("FileManager", "File added: " + path);
+            } else if (m_fileTimes[path] != time) {
+                Logger::instance().logInfo("FileManager", "File modified: " + path);
+            }
         }
-    }
-    
-    for (auto it = m_fileTimes.begin(); it != m_fileTimes.end(); ++it) {
-        if (!result.fileTimes.contains(it.key())) {
-            Logger::instance().logInfo("FileManager", "File removed: " + it.key());
+        
+        for (auto it = m_fileTimes.begin(); it != m_fileTimes.end(); ++it) {
+            if (!result.fileTimes.contains(it.key())) {
+                Logger::instance().logInfo("FileManager", "File removed: " + it.key());
+            }
         }
-    }
 
-    m_files = result.files;
-    m_fileTimes = result.fileTimes;
-    m_replacePaths = result.replacePaths;
+        m_files = result.files;
+        m_fileTimes = result.fileTimes;
+        m_replacePaths = result.replacePaths;
+        
+        m_watcher->removeAllPaths();
+        for (const QString& path : result.watchedPaths) {
+            m_watcher->addPath(path);
+        }
+        
+        m_isScanning = false;
+        Logger::instance().logInfo("FileManager", QString("Scan finished. Total files: %1").arg(m_files.size()));
+    } // Unlock mutex before emitting signal to avoid deadlock
     
-    m_watcher->removeAllPaths();
-    for (const QString& path : result.watchedPaths) {
-        m_watcher->addPath(path);
-    }
-    
-    m_isScanning = false;
-    Logger::instance().logInfo("FileManager", QString("Scan finished. Total files: %1").arg(m_files.size()));
     emit scanFinished();
 }
 

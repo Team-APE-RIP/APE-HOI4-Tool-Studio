@@ -1,3 +1,7 @@
 {
-    "Title": "Tools"
+    "Title": "Tools",
+    "VersionMismatch": "Version Mismatch!",
+    "RequiresApp": "Requires App v%1",
+    "CurrentApp": "Current App v%2",
+    "MismatchWarning": "This may cause issues."
 }

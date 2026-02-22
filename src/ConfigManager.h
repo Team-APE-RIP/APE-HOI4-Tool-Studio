@@ -38,6 +38,9 @@ public:
     bool getSidebarCompactMode() const;
     void setSidebarCompactMode(bool enabled);
 
+    int getMaxLogFiles() const;
+    void setMaxLogFiles(int count);
+
     // Mod Settings
     QString getModPath() const;
     void setModPath(const QString& path);
@@ -60,6 +63,7 @@ private:
     Theme m_theme;
     bool m_debugMode;
     bool m_sidebarCompactMode;
+    int m_maxLogFiles;
 
     QString m_modPath;
 };

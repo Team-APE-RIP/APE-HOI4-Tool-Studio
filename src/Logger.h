@@ -15,6 +15,7 @@ public:
     void logWarning(const QString& context, const QString& message); // Added
     void logInfo(const QString& context, const QString& message);
     void openLogDirectory();
+    void cleanOldLogs();
 
 private:
     Logger();

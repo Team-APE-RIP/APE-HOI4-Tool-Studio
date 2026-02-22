@@ -98,6 +98,14 @@ void SettingsPage::setupUi() {
     });
     debugLayout->addWidget(createSettingRow("Debug", "🐞", "Show Usage Overlay", "Show memory usage overlay", m_debugCheck));
 
+    m_maxLogFilesSpin = new QSpinBox();
+    m_maxLogFilesSpin->setRange(1, 100);
+    m_maxLogFilesSpin->setValue(ConfigManager::instance().getMaxLogFiles());
+    connect(m_maxLogFilesSpin, QOverload<int>::of(&QSpinBox::valueChanged), [](int value){
+        ConfigManager::instance().setMaxLogFiles(value);
+    });
+    debugLayout->addWidget(createSettingRow("MaxLogs", "🧹", "Max Log Files", "Number of log files to keep", m_maxLogFilesSpin));
+
     m_openLogBtn = new QPushButton("Open Logs");
     m_openLogBtn->setObjectName("OpenLogBtn");
     m_openLogBtn->setCursor(Qt::PointingHandCursor);
@@ -112,7 +120,6 @@ void SettingsPage::setupUi() {
 
     QWidget *aboutRow = new QWidget();
     aboutRow->setObjectName("SettingRow");
-    // Removed setFixedHeight to allow expansion
     QVBoxLayout *aboutRowLayout = new QVBoxLayout(aboutRow);
     aboutRowLayout->setContentsMargins(20, 20, 20, 20);
     aboutRowLayout->setSpacing(10);
@@ -138,7 +145,6 @@ void SettingsPage::setupUi() {
     licenseLink->setObjectName("LicenseLink");
     licenseLink->setFlat(true);
     licenseLink->setCursor(Qt::PointingHandCursor);
-    // Style handled in applyTheme (same as GithubLink)
     connect(licenseLink, &QPushButton::clicked, [this](){ openUrl("https://github.com/Team-APE-RIP/APE-HOI4-Tool-Studio/blob/main/LICENSE"); });
 
     m_openSourceToggleBtn = new QPushButton("Open Source Libraries ▼");
@@ -225,9 +231,6 @@ QWidget* SettingsPage::createSettingRow(const QString &id, const QString &icon, 
 
 void SettingsPage::updateTexts() {
     LocalizationManager& loc = LocalizationManager::instance();
-    QString lang = ConfigManager::instance().getLanguage();
-    bool isZh = (lang == "简体中文");
-    bool isTw = (lang == QString::fromUtf8("繁體中文"));
 
     // Update Theme Combo Items
     {
@@ -265,6 +268,11 @@ void SettingsPage::updateTexts() {
     if(debugTitle) debugTitle->setText(loc.getString("SettingsPage", "Debug_Title"));
     QLabel *debugDesc = findChild<QLabel*>("Debug_Desc");
     if(debugDesc) debugDesc->setText(loc.getString("SettingsPage", "Debug_Desc"));
+
+    QLabel *maxLogsTitle = findChild<QLabel*>("MaxLogs_Title");
+    if(maxLogsTitle) maxLogsTitle->setText(loc.getString("SettingsPage", "MaxLogs_Title"));
+    QLabel *maxLogsDesc = findChild<QLabel*>("MaxLogs_Desc");
+    if(maxLogsDesc) maxLogsDesc->setText(loc.getString("SettingsPage", "MaxLogs_Desc"));
 
     QLabel *logTitle = findChild<QLabel*>("Log_Title");
     if(logTitle) logTitle->setText(loc.getString("SettingsPage", "Log_Title"));

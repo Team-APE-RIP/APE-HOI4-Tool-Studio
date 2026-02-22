@@ -17,6 +17,13 @@ QString FileManagerTool::description() const {
     return m_localizedDescs.value(m_currentLang, "Browse and manage game files with mod priority.");
 }
 
+void FileManagerTool::setMetaData(const QJsonObject& metaData) {
+    m_id = metaData.value("id").toString();
+    m_version = metaData.value("version").toString();
+    m_compatibleVersion = metaData.value("compatibleVersion").toString();
+    m_author = metaData.value("author").toString();
+}
+
 QIcon FileManagerTool::icon() const {
     // Determine path to cover.png
     // It should be in the same directory as the plugin DLL

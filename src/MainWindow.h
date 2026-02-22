@@ -9,6 +9,7 @@
 #include <QLabel>
 #include <QMouseEvent>
 #include <QTimer>
+#include <QSplitter>
 #include "SettingsPage.h"
 #include "ConfigPage.h"
 #include "ToolsPage.h"
@@ -64,6 +65,9 @@ private:
     QWidget *m_sidebar;
     QStackedWidget *m_mainStack; 
     QWidget *m_dashboard;
+    QSplitter *m_dashboardSplitter;
+    QWidget *m_dashboardContent;
+    QWidget *m_rightSidebar;
     SettingsPage *m_settingsPage;
     ConfigPage *m_configPage;
     ToolsPage *m_toolsPage;

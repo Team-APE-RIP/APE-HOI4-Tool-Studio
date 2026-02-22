@@ -120,6 +120,13 @@ QWidget* ToolsPage::createToolCard(ToolInterface* tool) {
     layout->setContentsMargins(0, 0, 0, 0);
     layout->setSpacing(0);
 
+    // Cover Area (Container for Image + Warning)
+    QWidget *coverContainer = new QWidget();
+    coverContainer->setFixedHeight(250);
+    QGridLayout *coverLayout = new QGridLayout(coverContainer);
+    coverLayout->setContentsMargins(0, 0, 0, 0);
+    coverLayout->setSpacing(0);
+
     // Cover Image
     QLabel *iconLbl = new QLabel();
     QIcon icon = tool->icon();
@@ -132,8 +139,26 @@ QWidget* ToolsPage::createToolCard(ToolInterface* tool) {
         iconLbl->setAlignment(Qt::AlignCenter);
         iconLbl->setStyleSheet("background-color: #333; color: #888;");
     }
-    iconLbl->setFixedHeight(250);
     iconLbl->setStyleSheet("border-top-left-radius: 10px; border-top-right-radius: 10px;");
+    
+    // Add image to layout (Layer 0)
+    coverLayout->addWidget(iconLbl, 0, 0);
+
+    // Version Check
+    QString appVersion = APP_VERSION;
+    QString requiredVersion = tool->compatibleVersion();
+    bool versionMismatch = (appVersion != requiredVersion);
+
+    if (versionMismatch) {
+        QLabel *warningLbl = new QLabel("!");
+        warningLbl->setFixedSize(24, 24);
+        warningLbl->setStyleSheet("background-color: #FF3B30; color: white; border-radius: 12px; font-weight: bold; qproperty-alignment: AlignCenter; margin: 5px;");
+        
+        // Tooltip will be set in updateTexts
+        
+        // Add warning to layout (Layer 1), top-right
+        coverLayout->addWidget(warningLbl, 0, 0, Qt::AlignTop | Qt::AlignRight);
+    }
 
     // Title Area
     QWidget *titleArea = new QWidget();
@@ -154,7 +179,7 @@ QWidget* ToolsPage::createToolCard(ToolInterface* tool) {
 
     titleLayout->addWidget(titleLbl);
 
-    layout->addWidget(iconLbl);
+    layout->addWidget(coverContainer);
     layout->addWidget(titleArea);
 
     // Store for localization updates
@@ -178,12 +203,29 @@ void ToolsPage::updateTexts() {
         card.titleLabel->setText(card.tool->name());
         card.descLabel->setText(card.tool->description());
         
-        // Tooltip with Author and Description
-        QString tooltip = QString("<b>%1</b><br>%2: %3<br><br>%4")
+        // Tooltip with Author, Version and Description
+        QString tooltip = QString("<b>%1</b> (v%2)<br>%3: %4<br><br>%5")
                           .arg(card.tool->name())
+                          .arg(card.tool->version())
                           .arg(authorLabel)
                           .arg(card.tool->author())
                           .arg(card.tool->description());
+        
+        // Add version mismatch warning to main tooltip as well
+        QString appVersion = APP_VERSION;
+        if (card.tool->compatibleVersion() != appVersion) {
+            QString mismatchTitle = loc.getString("ToolsPage", "VersionMismatch");
+            QString reqApp = loc.getString("ToolsPage", "RequiresApp").arg(card.tool->compatibleVersion());
+            QString currApp = loc.getString("ToolsPage", "CurrentApp").arg(appVersion);
+            QString warning = loc.getString("ToolsPage", "MismatchWarning");
+
+            tooltip += QString("<br><br><font color='red'><b>%1</b><br>%2<br>%3<br>%4</font>")
+                       .arg(mismatchTitle)
+                       .arg(reqApp)
+                       .arg(currApp)
+                       .arg(warning);
+        }
+        
         card.cardWidget->setToolTip(tooltip); 
     }
 }

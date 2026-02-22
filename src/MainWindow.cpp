@@ -5,6 +5,7 @@
 #include "PathValidator.h"
 #include "SetupDialog.h"
 #include "FileManager.h"
+#include "TagManager.h"
 #include "ToolManager.h"
 #include "Logger.h"
 #include <QHBoxLayout>
@@ -43,6 +44,9 @@ MainWindow::MainWindow(QWidget *parent)
 
     // Start File Scanning
     FileManager::instance().startScanning();
+
+    // Initialize TagManager (it will listen to FileManager scan events)
+    TagManager::instance();
 
     // Load Tools
     ToolManager::instance().loadTools();
@@ -87,10 +91,34 @@ void MainWindow::setupUi() {
     
     m_dashboard = new QWidget();
     m_dashboard->setObjectName("Dashboard");
-    QLabel *dashLabel = new QLabel("Dashboard Area", m_dashboard);
+    
+    // Dashboard Splitter (Content | Right Sidebar)
+    QHBoxLayout *dashLayout = new QHBoxLayout(m_dashboard);
+    dashLayout->setContentsMargins(0, 0, 0, 0);
+    dashLayout->setSpacing(0);
+
+    m_dashboardSplitter = new QSplitter(Qt::Horizontal, m_dashboard);
+    m_dashboardSplitter->setHandleWidth(1);
+    
+    m_dashboardContent = new QWidget();
+    QVBoxLayout *contentLayout = new QVBoxLayout(m_dashboardContent);
+    contentLayout->setContentsMargins(0, 0, 0, 0);
+    QLabel *dashLabel = new QLabel("Dashboard Area", m_dashboardContent);
     dashLabel->setAlignment(Qt::AlignCenter);
-    QVBoxLayout *dashLayout = new QVBoxLayout(m_dashboard);
-    dashLayout->addWidget(dashLabel);
+    contentLayout->addWidget(dashLabel);
+
+    m_rightSidebar = new QWidget();
+    m_rightSidebar->setFixedWidth(250); // Default width
+    m_rightSidebar->hide(); // Hidden by default
+    QVBoxLayout *rightLayout = new QVBoxLayout(m_rightSidebar);
+    rightLayout->setContentsMargins(0, 0, 0, 0);
+
+    m_dashboardSplitter->addWidget(m_dashboardContent);
+    m_dashboardSplitter->addWidget(m_rightSidebar);
+    m_dashboardSplitter->setStretchFactor(0, 1);
+    m_dashboardSplitter->setStretchFactor(1, 0);
+
+    dashLayout->addWidget(m_dashboardSplitter);
     m_mainStack->addWidget(m_dashboard);
 
     m_settingsPage = new SettingsPage();
@@ -384,24 +412,42 @@ void MainWindow::onToolSelected(const QString &toolId) {
 
     Logger::instance().logInfo("MainWindow", "Launching tool: " + tool->name());
 
-    // Clear current dashboard
+    // Clear current dashboard content
     QLayoutItem *child;
-    while ((child = m_dashboard->layout()->takeAt(0)) != nullptr) {
+    while ((child = m_dashboardContent->layout()->takeAt(0)) != nullptr) {
         delete child->widget();
         delete child;
     }
+    
+    // Clear right sidebar
+    while ((child = m_rightSidebar->layout()->takeAt(0)) != nullptr) {
+        delete child->widget();
+        delete child;
+    }
+    m_rightSidebar->hide();
 
     // Create and add tool widget
-    QWidget *toolWidget = tool->createWidget(m_dashboard);
+    QWidget *toolWidget = tool->createWidget(m_dashboardContent);
     if (toolWidget) {
-        m_dashboard->layout()->addWidget(toolWidget);
+        m_dashboardContent->layout()->addWidget(toolWidget);
         ToolManager::instance().setToolActive(true);
+        
+        // Handle Sidebar
+        QWidget *sidebarWidget = tool->createSidebarWidget(m_rightSidebar);
+        if (sidebarWidget) {
+            m_rightSidebar->layout()->addWidget(sidebarWidget);
+            m_rightSidebar->show();
+        }
+        
+        // Load current language for the tool (after widgets are created)
+        QString currentLang = ConfigManager::instance().getLanguage();
+        tool->loadLanguage(currentLang);
     } else {
         Logger::instance().logError("MainWindow", "Failed to create widget for tool: " + toolId);
         // Restore default dashboard?
-        QLabel *dashLabel = new QLabel("Dashboard Area", m_dashboard);
+        QLabel *dashLabel = new QLabel("Dashboard Area", m_dashboardContent);
         dashLabel->setAlignment(Qt::AlignCenter);
-        m_dashboard->layout()->addWidget(dashLabel);
+        m_dashboardContent->layout()->addWidget(dashLabel);
         ToolManager::instance().setToolActive(false);
     }
 

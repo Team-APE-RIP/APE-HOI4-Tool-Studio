@@ -6,6 +6,7 @@
 #include <QCheckBox>
 #include <QLabel>
 #include <QPushButton>
+#include <QSpinBox>
 
 class SettingsPage : public QWidget {
     Q_OBJECT
@@ -36,6 +37,7 @@ private:
     QComboBox *m_languageCombo;
     QCheckBox *m_debugCheck;
     QCheckBox *m_sidebarCompactCheck;
+    QSpinBox *m_maxLogFilesSpin;
     QLabel *m_versionLabel;
     QWidget *m_openSourceArea;
     QPushButton *m_openSourceToggleBtn;

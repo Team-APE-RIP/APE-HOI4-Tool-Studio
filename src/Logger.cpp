@@ -1,10 +1,13 @@
 #include "Logger.h"
+#include "ConfigManager.h"
 #include <QStandardPaths>
 #include <QDir>
 #include <QDateTime>
 #include <QDebug>
 #include <QDesktopServices>
 #include <QUrl>
+#include <QFileInfoList>
+#include <algorithm>
 
 Logger& Logger::instance() {
     static Logger instance;
@@ -12,10 +15,9 @@ Logger& Logger::instance() {
 }
 
 Logger::Logger() {
-    // Manually construct path to ensure consistency with ConfigManager if needed, 
-    // but AppLocalDataLocation usually includes Organization/AppName.
-    // Since we changed OrganizationName to "Team APE-RIP", it should be fine.
-    // However, to be safe and consistent with user request:
+    // Clean old logs before creating a new one
+    cleanOldLogs();
+
     QString logDir = QStandardPaths::writableLocation(QStandardPaths::TempLocation) + "/APE-HOI4-Tool-Studio/logs";
     
     QDir dir(logDir);
@@ -72,4 +74,28 @@ void Logger::logInfo(const QString& context, const QString& message) {
 void Logger::openLogDirectory() {
     QString logDir = QStandardPaths::writableLocation(QStandardPaths::TempLocation) + "/APE-HOI4-Tool-Studio/logs";
     QDesktopServices::openUrl(QUrl::fromLocalFile(logDir));
+}
+
+void Logger::cleanOldLogs() {
+    int maxFiles = ConfigManager::instance().getMaxLogFiles();
+    if (maxFiles <= 0) return;
+
+    QString logDir = QStandardPaths::writableLocation(QStandardPaths::TempLocation) + "/APE-HOI4-Tool-Studio/logs";
+    QDir dir(logDir);
+    if (!dir.exists()) return;
+
+    QFileInfoList files = dir.entryInfoList(QStringList() << "log_*.txt", QDir::Files, QDir::Time);
+    
+    // Files are sorted by time (newest first due to QDir::Time default if not specified otherwise, 
+    // but actually it's usually newest first in entryInfoList if we want latest)
+    // Let's be explicit.
+    std::sort(files.begin(), files.end(), [](const QFileInfo& a, const QFileInfo& b) {
+        return a.lastModified() > b.lastModified(); // Newest first
+    });
+
+    if (files.size() > maxFiles) {
+        for (int i = maxFiles; i < files.size(); ++i) {
+            QFile::remove(files[i].absoluteFilePath());
+        }
+    }
 }

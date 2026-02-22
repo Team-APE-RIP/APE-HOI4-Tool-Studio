@@ -15,6 +15,7 @@ ConfigManager::ConfigManager() {
     m_theme = Theme::System;
     m_debugMode = false;
     m_sidebarCompactMode = false;
+    m_maxLogFiles = 10; // Default to 10
     loadConfig();
 }
 
@@ -48,6 +49,7 @@ void ConfigManager::loadConfig() {
         if (obj.contains("theme")) m_theme = static_cast<Theme>(obj["theme"].toInt());
         if (obj.contains("debugMode")) m_debugMode = obj["debugMode"].toBool();
         if (obj.contains("sidebarCompact")) m_sidebarCompactMode = obj["sidebarCompact"].toBool();
+        if (obj.contains("maxLogFiles")) m_maxLogFiles = obj["maxLogFiles"].toInt();
         file.close();
     }
 
@@ -69,6 +71,7 @@ void ConfigManager::saveConfig() {
     obj["theme"] = static_cast<int>(m_theme);
     obj["debugMode"] = m_debugMode;
     obj["sidebarCompact"] = m_sidebarCompactMode;
+    obj["maxLogFiles"] = m_maxLogFiles;
 
     QJsonDocument doc(obj);
     QFile file(getGlobalConfigPath());
@@ -121,6 +124,9 @@ void ConfigManager::setDebugMode(bool enabled) { m_debugMode = enabled; saveConf
 
 bool ConfigManager::getSidebarCompactMode() const { return m_sidebarCompactMode; }
 void ConfigManager::setSidebarCompactMode(bool enabled) { m_sidebarCompactMode = enabled; saveConfig(); }
+
+int ConfigManager::getMaxLogFiles() const { return m_maxLogFiles; }
+void ConfigManager::setMaxLogFiles(int count) { m_maxLogFiles = count; saveConfig(); }
 
 QString ConfigManager::getModPath() const { return m_modPath; }
 void ConfigManager::setModPath(const QString& path) { 
