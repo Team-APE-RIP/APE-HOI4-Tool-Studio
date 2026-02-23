@@ -86,10 +86,10 @@ target_link_libraries(APEHOI4ToolStudio PRIVATE Qt6::Core Qt6::Gui Qt6::Widgets 
 
 # --- FileManager Tool (Example Plugin) ---
 set(FILEMANAGER_TOOL_SOURCES
-    src/tools/FileManagerTool/FileManagerTool.cpp
-    src/tools/FileManagerTool/FileManagerTool.h
-    src/tools/FileManagerTool/FileTreeWidget.cpp
-    src/tools/FileManagerTool/FileTreeWidget.h
+    tools/FileManagerTool/FileManagerTool.cpp
+    tools/FileManagerTool/FileManagerTool.h
+    tools/FileManagerTool/FileTreeWidget.cpp
+    tools/FileManagerTool/FileTreeWidget.h
 )
 
 add_library(FileManagerTool SHARED ${FILEMANAGER_TOOL_SOURCES})
@@ -104,28 +104,28 @@ set_target_properties(FileManagerTool PROPERTIES
 # Copy metadata.json to output directory
 add_custom_command(TARGET FileManagerTool POST_BUILD
     COMMAND ${CMAKE_COMMAND} -E copy
-    "${CMAKE_CURRENT_SOURCE_DIR}/src/tools/FileManagerTool/metadata.json"
+    "${CMAKE_CURRENT_SOURCE_DIR}/tools/FileManagerTool/metadata.json"
     "$<TARGET_FILE_DIR:FileManagerTool>/metadata.json"
 )
 
 # Copy localization directory
 add_custom_command(TARGET FileManagerTool POST_BUILD
     COMMAND ${CMAKE_COMMAND} -E copy_directory
-    "${CMAKE_CURRENT_SOURCE_DIR}/src/tools/FileManagerTool/localization"
+    "${CMAKE_CURRENT_SOURCE_DIR}/tools/FileManagerTool/localization"
     "$<TARGET_FILE_DIR:FileManagerTool>/localization"
 )
 
 # Copy cover image
 add_custom_command(TARGET FileManagerTool POST_BUILD
     COMMAND ${CMAKE_COMMAND} -E copy
-    "${CMAKE_CURRENT_SOURCE_DIR}/src/tools/FileManagerTool/cover.png"
+    "${CMAKE_CURRENT_SOURCE_DIR}/tools/FileManagerTool/cover.png"
     "$<TARGET_FILE_DIR:FileManagerTool>/cover.png"
 )
 
 # --- FlagManager Tool ---
 set(FLAGMANAGER_TOOL_SOURCES
-    src/tools/FlagManagerTool/FlagManagerTool.cpp
-    src/tools/FlagManagerTool/FlagManagerTool.h
+    tools/FlagManagerTool/FlagManagerTool.cpp
+    tools/FlagManagerTool/FlagManagerTool.h
 )
 
 add_library(FlagManagerTool SHARED ${FLAGMANAGER_TOOL_SOURCES})
@@ -138,19 +138,19 @@ set_target_properties(FlagManagerTool PROPERTIES
 
 add_custom_command(TARGET FlagManagerTool POST_BUILD
     COMMAND ${CMAKE_COMMAND} -E copy
-    "${CMAKE_CURRENT_SOURCE_DIR}/src/tools/FlagManagerTool/metadata.json"
+    "${CMAKE_CURRENT_SOURCE_DIR}/tools/FlagManagerTool/metadata.json"
     "$<TARGET_FILE_DIR:FlagManagerTool>/metadata.json"
 )
 
 add_custom_command(TARGET FlagManagerTool POST_BUILD
     COMMAND ${CMAKE_COMMAND} -E copy_directory
-    "${CMAKE_CURRENT_SOURCE_DIR}/src/tools/FlagManagerTool/localization"
+    "${CMAKE_CURRENT_SOURCE_DIR}/tools/FlagManagerTool/localization"
     "$<TARGET_FILE_DIR:FlagManagerTool>/localization"
 )
 
 # Copy cover image if exists (optional for now)
 # add_custom_command(TARGET FlagManagerTool POST_BUILD
 #     COMMAND ${CMAKE_COMMAND} -E copy
-#     "${CMAKE_CURRENT_SOURCE_DIR}/src/tools/FlagManagerTool/cover.png"
+#     "${CMAKE_CURRENT_SOURCE_DIR}/tools/FlagManagerTool/cover.png"
 #     "$<TARGET_FILE_DIR:FlagManagerTool>/cover.png"
 # )

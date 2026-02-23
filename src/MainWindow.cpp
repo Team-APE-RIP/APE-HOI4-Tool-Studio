@@ -302,12 +302,15 @@ void MainWindow::applyTheme() {
     QString rowBg = isDark ? "#2C2C2E" : "#FFFFFF";
     QString rowHover = isDark ? "#3A3A3C" : "#F5F5F7";
     QString iconBg = isDark ? "#3A3A3C" : "#EEEEEE";
+    QString treeItemHover = isDark ? "#3A3A3C" : "#E8E8E8";
+    QString treeItemSelected = isDark ? "#0A84FF" : "#007AFF";
     
     QString style = QString(R"(
         QWidget#CentralWidget { background-color: %1; border: 1px solid %4; border-radius: 10px; }
         QWidget#Sidebar { background-color: %2; border-right: 1px solid %4; border-top-left-radius: 10px; border-bottom-left-radius: 10px; }
         QWidget#OverlayContainer { background-color: %2; border-top-right-radius: 10px; border-bottom-right-radius: 10px; }
         QWidget#SettingsContent, QWidget#ToolsContent { background-color: %2; }
+        QWidget#Dashboard { background-color: %1; }
         
         QLabel { color: %3; }
         QLabel#SidebarTitle { font-size: 16px; font-weight: 800; }
@@ -344,9 +347,91 @@ void MainWindow::applyTheme() {
             background-color: #007AFF; border: 1px solid #007AFF;
             image: url(:/checkmark.svg); /* Ideally need a checkmark icon, or just color */
         }
-    )").arg(bg, sidebarBg, text, border, rowBg, rowHover, iconBg);
+        
+        QTreeWidget {
+            background-color: %2; border: none; color: %3;
+        }
+        QTreeWidget::item {
+            padding: 5px;
+        }
+        QTreeWidget::item:hover {
+            background-color: %8;
+        }
+        QTreeWidget::item:selected {
+            background-color: %9; color: white;
+        }
+        QHeaderView::section {
+            background-color: %2; color: %3; border: none; padding: 5px;
+        }
+        
+        QScrollArea {
+            background-color: %1; border: none;
+        }
+        
+        QToolTip {
+            background-color: %2; color: %3; border: 1px solid %4; padding: 5px; border-radius: 4px;
+        }
+        
+        QSplitter::handle {
+            background-color: %4;
+        }
+        
+        /* Mac-style scrollbar */
+        QScrollBar:vertical {
+            background: transparent;
+            width: 8px;
+            margin: 4px 2px 4px 2px;
+        }
+        QScrollBar::handle:vertical {
+            background: rgba(128, 128, 128, 0.4);
+            min-height: 30px;
+            border-radius: 3px;
+        }
+        QScrollBar::handle:vertical:hover {
+            background: rgba(128, 128, 128, 0.6);
+        }
+        QScrollBar::handle:vertical:pressed {
+            background: rgba(128, 128, 128, 0.8);
+        }
+        QScrollBar::add-line:vertical, QScrollBar::sub-line:vertical {
+            height: 0px;
+        }
+        QScrollBar::add-page:vertical, QScrollBar::sub-page:vertical {
+            background: transparent;
+        }
+        
+        QScrollBar:horizontal {
+            background: transparent;
+            height: 8px;
+            margin: 2px 4px 2px 4px;
+        }
+        QScrollBar::handle:horizontal {
+            background: rgba(128, 128, 128, 0.4);
+            min-width: 30px;
+            border-radius: 3px;
+        }
+        QScrollBar::handle:horizontal:hover {
+            background: rgba(128, 128, 128, 0.6);
+        }
+        QScrollBar::handle:horizontal:pressed {
+            background: rgba(128, 128, 128, 0.8);
+        }
+        QScrollBar::add-line:horizontal, QScrollBar::sub-line:horizontal {
+            width: 0px;
+        }
+        QScrollBar::add-page:horizontal, QScrollBar::sub-page:horizontal {
+            background: transparent;
+        }
+    )").arg(bg, sidebarBg, text, border, rowBg, rowHover, iconBg, treeItemHover, treeItemSelected);
     
     setStyleSheet(style);
+    
+    // Apply theme to right sidebar
+    m_rightSidebar->setStyleSheet(QString("background-color: %1; border-left: 1px solid %2;").arg(sidebarBg, border));
+    m_dashboardContent->setStyleSheet(QString("background-color: %1;").arg(bg));
+    
+    // Apply theme to splitter handle
+    m_dashboardSplitter->setStyleSheet(QString("QSplitter::handle { background-color: %1; }").arg(border));
 }
 
 void MainWindow::updateTexts() {
@@ -474,6 +559,17 @@ void MainWindow::onLanguageChanged() {
 
 void MainWindow::onThemeChanged() {
     applyTheme();
+    
+    // Update ToolsPage theme (must be after applyTheme to override global styles)
+    m_toolsPage->updateTheme();
+    
+    // Notify active tool to update theme
+    if (ToolManager::instance().isToolActive()) {
+        QList<ToolInterface*> tools = ToolManager::instance().getTools();
+        for (ToolInterface* tool : tools) {
+            tool->applyTheme();
+        }
+    }
 }
 
 void MainWindow::onDebugModeChanged(bool enabled) {

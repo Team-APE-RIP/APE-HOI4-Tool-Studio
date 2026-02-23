@@ -1,6 +1,6 @@
 #include "FileTreeWidget.h"
-#include "../../FileManager.h"
-#include "../../ConfigManager.h"
+#include "../../src/FileManager.h"
+#include "../../src/ConfigManager.h"
 #include <QVBoxLayout>
 #include <QHeaderView>
 #include <QFileInfo>
@@ -9,6 +9,9 @@
 #include <QPainterPath>
 
 FileTreeWidget::FileTreeWidget(QWidget *parent) : QWidget(parent) {
+    setObjectName("FileTreeWidget");
+    setAttribute(Qt::WA_StyledBackground, true);
+    
     setupUi();
     buildTree();
     
@@ -52,14 +55,17 @@ void FileTreeWidget::updateTheme() {
     ConfigManager::Theme theme = ConfigManager::instance().getTheme();
     bool isDark = (theme == ConfigManager::Theme::Dark);
     
-    QString bg = isDark ? "#2C2C2E" : "#FFFFFF";
+    QString bg = isDark ? "#1C1C1E" : "#FFFFFF";
     QString text = isDark ? "#FFFFFF" : "#1D1D1F";
     QString border = isDark ? "#3A3A3C" : "#D2D2D7";
-    QString inputBg = isDark ? "#1C1C1E" : "#FFFFFF";
+    QString inputBg = isDark ? "#2C2C2E" : "#FFFFFF";
     QString altRow = isDark ? "#3A3A3C" : "#F5F5F7";
     QString headerBg = isDark ? "#3A3A3C" : "#F5F5F7";
     QString hoverBg = isDark ? "#48484A" : "#E5E5EA";
     QString pathColor = isDark ? "#AAAAAA" : "#888888";
+
+    // Set widget background using specific selector
+    setStyleSheet(QString("QWidget#FileTreeWidget { background-color: %1; }").arg(bg));
 
     // Search Box
     m_searchBox->setStyleSheet(QString(R"(

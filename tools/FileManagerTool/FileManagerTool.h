@@ -2,7 +2,10 @@
 #define FILEMANAGERTOOL_H
 
 #include <QObject>
-#include "../../ToolInterface.h"
+#include <QPointer>
+#include "../../src/ToolInterface.h"
+
+class FileTreeWidget;
 
 class FileManagerTool : public QObject, public ToolInterface {
     Q_OBJECT
@@ -24,6 +27,7 @@ public:
     void initialize() override;
     QWidget* createWidget(QWidget* parent = nullptr) override;
     void loadLanguage(const QString& lang) override;
+    void applyTheme() override;
 
 private:
     QMap<QString, QString> m_localizedNames;
@@ -36,6 +40,9 @@ private:
     QString m_version;
     QString m_compatibleVersion;
     QString m_author;
+    
+    // Widget reference
+    QPointer<FileTreeWidget> m_treeWidget;
 };
 
 #endif // FILEMANAGERTOOL_H

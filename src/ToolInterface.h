@@ -35,6 +35,9 @@ public:
     
     // Localization
     virtual void loadLanguage(const QString& lang) = 0;
+    
+    // Theme
+    virtual void applyTheme() {}
 };
 
 #define ToolInterface_iid "com.ape.hoi4toolstudio.ToolInterface"

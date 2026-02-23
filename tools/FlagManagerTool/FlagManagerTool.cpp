@@ -21,10 +21,10 @@
 #include <QWheelEvent>
 #include <QFileInfo>
 #include <QImageReader>
-#include "TagManager.h"
-#include "FileManager.h"
-#include "ConfigManager.h"
-#include "Logger.h"
+#include "../../src/TagManager.h"
+#include "../../src/FileManager.h"
+#include "../../src/ConfigManager.h"
+#include "../../src/Logger.h"
 
 // --- ImagePreviewWidget ---
 
@@ -328,14 +328,25 @@ FlagBrowserWidget::FlagBrowserWidget(FlagManagerTool* tool, QWidget* parent)
     layout->setContentsMargins(0, 0, 0, 0);
     layout->setSpacing(0);
 
-    QWidget* toolbar = new QWidget();
-    toolbar->setFixedHeight(40);
-    toolbar->setStyleSheet("background: rgba(128,128,128,0.1); border-bottom: 1px solid rgba(128,128,128,0.2);");
-    QHBoxLayout* tbLayout = new QHBoxLayout(toolbar);
+    m_scrollArea = new QScrollArea();
+    m_scrollContent = new QWidget();
+    m_scrollArea->setWidget(m_scrollContent);
+    m_scrollArea->setWidgetResizable(true);
+    m_scrollArea->setFrameShape(QFrame::NoFrame);
+    layout->addWidget(m_scrollArea, 1);
+
+    m_placeholder = new QLabel("Select a TAG to view flags.");
+    m_placeholder->setAlignment(Qt::AlignCenter);
+    layout->addWidget(m_placeholder);
+
+    m_toolbar = new QWidget();
+    m_toolbar->setObjectName("FlagToolbar");
+    m_toolbar->setFixedHeight(40);
+    QHBoxLayout* tbLayout = new QHBoxLayout(m_toolbar);
     tbLayout->setContentsMargins(10, 0, 10, 0);
     
+    tbLayout->addStretch();
     m_sizeGroup = new QButtonGroup(this);
-    // Set default text for size buttons
     QString defaultSizeTexts[] = {"Large", "Medium", "Small"};
     for (int i = 0; i < 3; ++i) {
         m_sizeBtns[i] = new QPushButton(defaultSizeTexts[i]);
@@ -346,19 +357,38 @@ FlagBrowserWidget::FlagBrowserWidget(FlagManagerTool* tool, QWidget* parent)
     m_sizeBtns[0]->setChecked(true);
     connect(m_sizeGroup, &QButtonGroup::idClicked, this, &FlagBrowserWidget::onSizeChanged);
     tbLayout->addStretch();
-    layout->addWidget(toolbar);
+    layout->addWidget(m_toolbar);
+    
+    applyTheme();
+}
 
-    m_scrollArea = new QScrollArea();
-    m_scrollContent = new QWidget();
-    m_scrollArea->setWidget(m_scrollContent);
-    m_scrollArea->setWidgetResizable(true);
-    m_scrollArea->setFrameShape(QFrame::NoFrame);
-    layout->addWidget(m_scrollArea);
-
-    m_placeholder = new QLabel("Select a TAG to view flags.");
-    m_placeholder->setAlignment(Qt::AlignCenter);
-    m_placeholder->setStyleSheet("color: gray; font-size: 18px;");
-    layout->addWidget(m_placeholder);
+void FlagBrowserWidget::applyTheme() {
+    bool isDark = ConfigManager::instance().getTheme() == ConfigManager::Theme::Dark;
+    QString toolbarBg = isDark ? "#2D2D30" : "#F5F5F5";
+    QString borderColor = isDark ? "#3F3F46" : "#E0E0E0";
+    QString textColor = isDark ? "#CCCCCC" : "#666666";
+    QString btnText = isDark ? "#FFFFFF" : "#333333";
+    QString btnBg = isDark ? "#3C3C3C" : "#E8E8E8";
+    QString btnHover = isDark ? "#4A4A4A" : "#D0D0D0";
+    
+    m_toolbar->setStyleSheet(QString("QWidget#FlagToolbar { background: %1; border-bottom: 1px solid %2; }").arg(toolbarBg, borderColor));
+    m_placeholder->setStyleSheet(QString("color: %1; font-size: 18px;").arg(textColor));
+    
+    QString btnStyle = QString(R"(
+        QPushButton {
+            background-color: %1; color: %2; border: 1px solid %3; border-radius: 4px; padding: 5px 12px;
+        }
+        QPushButton:hover {
+            background-color: %4;
+        }
+        QPushButton:checked {
+            background-color: #007AFF; color: white; border: 1px solid #007AFF;
+        }
+    )").arg(btnBg, btnText, borderColor, btnHover);
+    
+    for (int i = 0; i < 3; ++i) {
+        m_sizeBtns[i]->setStyleSheet(btnStyle);
+    }
 }
 
 void FlagBrowserWidget::updateTexts() {
@@ -386,19 +416,17 @@ void FlagBrowserWidget::refreshData() {
     QList<QString> tagKeys = TagManager::instance().getTags().keys();
     QSet<QString> validTags(tagKeys.begin(), tagKeys.end());
     
-    // Use FileManager to get only effective (filtered) files
     QMap<QString, FileDetails> effectiveFiles = FileManager::instance().getEffectiveFiles();
     
     for (auto it = effectiveFiles.begin(); it != effectiveFiles.end(); ++it) {
         const QString& relPath = it.key();
         const FileDetails& details = it.value();
         
-        // Check if this is a flag file
         if (!relPath.startsWith("gfx/flags/") || !relPath.endsWith(".tga")) continue;
         
-        QString subPath = relPath.mid(10); // Remove "gfx/flags/"
+        QString subPath = relPath.mid(10);
         QString baseName;
-        int sizeIndex = 0; // 0=Large, 1=Medium, 2=Small
+        int sizeIndex = 0;
         
         if (subPath.startsWith("medium/")) {
             baseName = QFileInfo(subPath.mid(7)).baseName();
@@ -424,7 +452,6 @@ void FlagBrowserWidget::refreshData() {
         else if (sizeIndex == 1) found->hasMedium = true;
         else found->hasSmall = true;
         
-        // Store the absolute path for this flag variant and size
         QString key = baseName + "_" + QString::number(sizeIndex);
         m_flagPaths[key] = details.absPath;
     }
@@ -443,10 +470,9 @@ void FlagBrowserWidget::refreshData() {
             if (!v.isComplete()) allComplete = false;
         }
         if (!hasDefault) item->setForeground(0, Qt::red);
-        else if (!allComplete) item->setForeground(0, QColor(255, 165, 0)); // Orange
+        else if (!allComplete) item->setForeground(0, QColor(255, 165, 0));
         
-        // Small preview for default flag
-        QString key = it.key() + "_2"; // size 2 = small
+        QString key = it.key() + "_2";
         if (m_flagPaths.contains(key)) {
             QImage img = loadTga(m_flagPaths[key]);
             if (!img.isNull()) item->setIcon(0, QIcon(QPixmap::fromImage(img)));
@@ -475,7 +501,6 @@ QImage FlagBrowserWidget::loadTga(const QString& path) {
     
     const uchar* ptr = reinterpret_cast<const uchar*>(data.constData());
     
-    // TGA Header
     int idLength = ptr[0];
     int colorMapType = ptr[1];
     int imageType = ptr[2];
@@ -484,9 +509,7 @@ QImage FlagBrowserWidget::loadTga(const QString& path) {
     int bpp = ptr[16];
     int descriptor = ptr[17];
     
-    // Support uncompressed true-color (type 2) or RLE true-color (type 10)
     if (colorMapType != 0 || (imageType != 2 && imageType != 10)) {
-        // Try Qt's built-in reader as fallback
         QImageReader reader(path);
         if (reader.canRead()) return reader.read();
         return QImage();
@@ -505,7 +528,6 @@ QImage FlagBrowserWidget::loadTga(const QString& path) {
     int pixelCount = width * height;
     
     if (imageType == 2) {
-        // Uncompressed
         for (int y = 0; y < height; ++y) {
             int destY = (descriptor & 0x20) ? y : (height - 1 - y);
             for (int x = 0; x < width; ++x) {
@@ -521,7 +543,6 @@ QImage FlagBrowserWidget::loadTga(const QString& path) {
             }
         }
     } else if (imageType == 10) {
-        // RLE compressed
         int currentPixel = 0;
         int dataIdx = 0;
         int maxDataSize = data.size() - pixelDataOffset;
@@ -531,7 +552,6 @@ QImage FlagBrowserWidget::loadTga(const QString& path) {
             int count = (header & 0x7F) + 1;
             
             if (header & 0x80) {
-                // RLE packet
                 if (dataIdx + bytesPerPixel > maxDataSize) break;
                 uchar b = pixelData[dataIdx];
                 uchar g = pixelData[dataIdx + 1];
@@ -546,7 +566,6 @@ QImage FlagBrowserWidget::loadTga(const QString& path) {
                     image.setPixel(x, destY, qRgba(r, g, b, a));
                 }
             } else {
-                // Raw packet
                 for (int i = 0; i < count && currentPixel < pixelCount; ++i, ++currentPixel) {
                     if (dataIdx + bytesPerPixel > maxDataSize) break;
                     uchar b = pixelData[dataIdx];
@@ -568,7 +587,6 @@ QImage FlagBrowserWidget::loadTga(const QString& path) {
 }
 
 void FlagBrowserWidget::updateFlagDisplay() {
-    // Clear old content completely
     if (m_scrollContent) {
         QLayout* oldLayout = m_scrollContent->layout();
         if (oldLayout) {
@@ -588,6 +606,10 @@ void FlagBrowserWidget::updateFlagDisplay() {
         }
     }
 
+    bool isDark = ConfigManager::instance().getTheme() == ConfigManager::Theme::Dark;
+    QString imgBg = isDark ? "#333333" : "#E0E0E0";
+    QString imgBorder = isDark ? "#555555" : "#CCCCCC";
+
     QGridLayout* gl = new QGridLayout(m_scrollContent);
     gl->setContentsMargins(20, 20, 20, 20);
     gl->setSpacing(20);
@@ -596,7 +618,7 @@ void FlagBrowserWidget::updateFlagDisplay() {
     QSize dispSize = (m_currentSizeIndex == 1 ? QSize(41, 26) : (m_currentSizeIndex == 2 ? QSize(10, 7) : QSize(82, 52)));
 
     int row = 0, col = 0;
-    int cellWidth = 180; // Fixed cell width for consistent spacing
+    int cellWidth = 180;
     
     for (const auto& v : variants) {
         QWidget* cellWidget = new QWidget();
@@ -606,11 +628,10 @@ void FlagBrowserWidget::updateFlagDisplay() {
         cell->setSpacing(5);
         
         QLabel* img = new QLabel();
-        img->setFixedSize(dispSize * 2); // Double for visibility
+        img->setFixedSize(dispSize * 2);
         img->setAlignment(Qt::AlignCenter);
-        img->setStyleSheet("background: #333; border: 1px solid #555;");
+        img->setStyleSheet(QString("background: %1; border: 1px solid %2;").arg(imgBg, imgBorder));
         
-        // Use m_flagPaths to get the correct absolute path
         QString key = v.name + "_" + QString::number(m_currentSizeIndex);
         QString flagPath = m_flagPaths.value(key);
         
@@ -647,8 +668,8 @@ FlagManagerMainWidget::FlagManagerMainWidget(FlagManagerTool* tool, QWidget* par
     layout->setSpacing(0);
     
     m_tabBar = new QWidget();
+    m_tabBar->setObjectName("FlagTabBar");
     m_tabBar->setFixedHeight(40);
-    m_tabBar->setStyleSheet("background: #252526;");
     QHBoxLayout* tabLayout = new QHBoxLayout(m_tabBar);
     tabLayout->setContentsMargins(10, 0, 10, 0);
     
@@ -671,14 +692,25 @@ FlagManagerMainWidget::FlagManagerMainWidget(FlagManagerTool* tool, QWidget* par
     m_stack->addWidget(m_converter);
     layout->addWidget(m_stack);
     
-    // Set initial visual state without triggering mode switch (m_listWidget not ready yet)
     m_stack->setCurrentIndex(0);
     m_browserBtn->setChecked(true);
     m_converterBtn->setChecked(false);
+    applyTheme();
+    updateButtonStyles(0);
+}
+
+void FlagManagerMainWidget::applyTheme() {
+    bool isDark = ConfigManager::instance().getTheme() == ConfigManager::Theme::Dark;
+    QString tabBarBg = isDark ? "#252526" : "#F0F0F0";
+    m_tabBar->setStyleSheet(QString("QWidget#FlagTabBar { background: %1; }").arg(tabBarBg));
+    m_browser->applyTheme();
+}
+
+void FlagManagerMainWidget::updateButtonStyles(int activeIndex) {
     QString active = "QPushButton { border: none; background: #007AFF; color: white; border-radius: 5px; padding: 5px 15px; font-weight: bold; }";
     QString inactive = "QPushButton { border: none; background: transparent; color: gray; border-radius: 5px; padding: 5px 15px; } QPushButton:hover { background: rgba(128,128,128,0.1); }";
-    m_browserBtn->setStyleSheet(active);
-    m_converterBtn->setStyleSheet(inactive);
+    m_browserBtn->setStyleSheet(activeIndex == 0 ? active : inactive);
+    m_converterBtn->setStyleSheet(activeIndex == 1 ? active : inactive);
 }
 
 void FlagManagerMainWidget::updateTexts() {
@@ -692,10 +724,7 @@ void FlagManagerMainWidget::onModeChanged(int index) {
     m_stack->setCurrentIndex(index);
     m_browserBtn->setChecked(index == 0);
     m_converterBtn->setChecked(index == 1);
-    QString active = "QPushButton { border: none; background: #007AFF; color: white; border-radius: 5px; padding: 5px 15px; font-weight: bold; }";
-    QString inactive = "QPushButton { border: none; background: transparent; color: gray; border-radius: 5px; padding: 5px 15px; } QPushButton:hover { background: rgba(128,128,128,0.1); }";
-    m_browserBtn->setStyleSheet(index == 0 ? active : inactive);
-    m_converterBtn->setStyleSheet(index == 1 ? active : inactive);
+    updateButtonStyles(index);
     m_tool->switchMode(index);
 }
 
@@ -706,13 +735,41 @@ FlagListWidget::FlagListWidget(FlagManagerTool* tool, QWidget* parent)
     QVBoxLayout* layout = new QVBoxLayout(this);
     layout->setContentsMargins(0, 0, 0, 0);
     m_header = new QLabel("TAGs");
-    m_header->setStyleSheet("font-weight: bold; padding: 10px; color: gray;");
     layout->addWidget(m_header);
     m_list = new QTreeWidget();
     m_list->setHeaderHidden(true);
     m_list->setIndentation(0);
     m_list->setFrameShape(QFrame::NoFrame);
     layout->addWidget(m_list);
+    applyTheme();
+}
+
+void FlagListWidget::applyTheme() {
+    bool isDark = ConfigManager::instance().getTheme() == ConfigManager::Theme::Dark;
+    QString headerColor = isDark ? "#CCCCCC" : "#666666";
+    QString listBg = isDark ? "#2C2C2E" : "#F5F5F7";
+    QString listText = isDark ? "#FFFFFF" : "#1D1D1F";
+    QString itemHover = isDark ? "#3A3A3C" : "#E8E8E8";
+    QString itemSelected = isDark ? "#0A84FF" : "#007AFF";
+    
+    m_header->setStyleSheet(QString("font-weight: bold; padding: 10px; color: %1;").arg(headerColor));
+    m_list->setStyleSheet(QString(R"(
+        QTreeWidget {
+            background-color: %1; border: none; color: %2;
+        }
+        QTreeWidget::item {
+            padding: 5px;
+        }
+        QTreeWidget::item:hover {
+            background-color: %3;
+        }
+        QTreeWidget::item:selected {
+            background-color: %4; color: white;
+        }
+        QHeaderView::section {
+            background-color: %1; color: %2; border: none; padding: 5px;
+        }
+    )").arg(listBg, listText, itemHover, itemSelected));
 }
 
 void FlagListWidget::updateTexts() {
@@ -749,7 +806,6 @@ QWidget* FlagManagerTool::createSidebarWidget(QWidget* parent) {
     if (m_mainWidget) {
         m_mainWidget->getBrowser()->setSidebarList(m_listWidget->getList());
         m_mainWidget->getConverter()->setSidebarList(m_listWidget->getList());
-        // Now trigger initial data load
         m_mainWidget->getBrowser()->refreshData();
     }
     return m_listWidget;
@@ -769,6 +825,10 @@ void FlagManagerTool::loadLanguage(const QString& lang) {
     }
 }
 QString FlagManagerTool::getString(const QString& key) { return m_localizedStrings.value(key).toString(key); }
+void FlagManagerTool::applyTheme() {
+    if (m_mainWidget) m_mainWidget->applyTheme();
+    if (m_listWidget) m_listWidget->applyTheme();
+}
 void FlagManagerTool::switchMode(int mode) {
     if (m_listWidget) {
         m_listWidget->setMode(mode);

@@ -9,6 +9,7 @@
 #include <QFrame>
 #include <QDebug>
 #include <QToolTip>
+#include <QStyle>
 
 ToolsPage::ToolsPage(QWidget *parent) : QWidget(parent) {
     setupUi();
@@ -234,12 +235,16 @@ void ToolsPage::updateTheme() {
     ConfigManager::Theme theme = ConfigManager::instance().getTheme();
     bool isDark = (theme == ConfigManager::Theme::Dark);
     
-    QString cardBg = isDark ? "rgba(255, 255, 255, 0.1)" : "rgba(0, 0, 0, 0.05)";
-    QString cardBorder = isDark ? "rgba(255, 255, 255, 0.2)" : "rgba(0, 0, 0, 0.1)";
-    QString titleBg = isDark ? "rgba(0, 0, 0, 0.6)" : "rgba(255, 255, 255, 0.8)";
+    // Adjusted colors for better contrast with background
+    QString cardBg = isDark ? "#3A3A3C" : "#FFFFFF";
+    QString cardBorder = isDark ? "#4A4A4C" : "#E0E0E2";
+    QString cardHover = isDark ? "#4A4A4C" : "#F5F5F7";
+    QString titleBg = isDark ? "#2C2C2E" : "#F0F0F2";
     QString titleText = isDark ? "#FFFFFF" : "#1D1D1F";
+    QString placeholderBg = isDark ? "#2C2C2E" : "#E8E8EA";
+    QString placeholderText = isDark ? "#888888" : "#666666";
 
-    // Update cards
+    // Update cards - use minimal style for card itself to avoid overriding children
     QString cardStyle = QString(R"(
         QPushButton#ToolCard {
             background-color: %1;
@@ -252,20 +257,41 @@ void ToolsPage::updateTheme() {
             background-color: %3;
             border: 1px solid #007AFF;
         }
-    )").arg(cardBg, cardBorder, isDark ? "rgba(255, 255, 255, 0.2)" : "rgba(0, 0, 0, 0.1)");
+    )").arg(cardBg, cardBorder, cardHover);
 
     for (const auto& card : m_toolCards) {
         card.cardWidget->setStyleSheet(cardStyle);
         
-        // Find title area and label
+        // Find title area and label - use direct style without selector
         QWidget* titleArea = card.cardWidget->findChild<QWidget*>("CardTitleArea");
         if (titleArea) {
-            titleArea->setStyleSheet(QString("background-color: %1; border-bottom-left-radius: 10px; border-bottom-right-radius: 10px;").arg(titleBg));
+            // Use setProperty to force style update
+            titleArea->setProperty("themeBackground", titleBg);
+            titleArea->setStyleSheet(QString("QWidget#CardTitleArea { background-color: %1; border-bottom-left-radius: 10px; border-bottom-right-radius: 10px; }").arg(titleBg));
+            titleArea->style()->unpolish(titleArea);
+            titleArea->style()->polish(titleArea);
+            titleArea->update();
         }
         
         QLabel* titleLbl = card.cardWidget->findChild<QLabel*>("CardTitle");
         if (titleLbl) {
-            titleLbl->setStyleSheet(QString("font-size: 14px; font-weight: bold; color: %1; background: transparent;").arg(titleText));
+            // Use setProperty to force style update
+            titleLbl->setProperty("themeColor", titleText);
+            titleLbl->setStyleSheet(QString("QLabel#CardTitle { font-size: 14px; font-weight: bold; color: %1; background: transparent; }").arg(titleText));
+            titleLbl->style()->unpolish(titleLbl);
+            titleLbl->style()->polish(titleLbl);
+            titleLbl->update();
         }
+        
+        // Find and update cover placeholder labels (those with "No Image" text)
+        QList<QLabel*> labels = card.cardWidget->findChildren<QLabel*>();
+        for (QLabel* lbl : labels) {
+            if (lbl->objectName() != "CardTitle" && lbl->text() == "No Image") {
+                lbl->setStyleSheet(QString("background-color: %1; color: %2; border-top-left-radius: 10px; border-top-right-radius: 10px;").arg(placeholderBg, placeholderText));
+            }
+        }
+        
+        // Force card to repaint
+        card.cardWidget->update();
     }
 }

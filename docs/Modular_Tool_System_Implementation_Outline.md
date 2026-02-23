@@ -107,8 +107,8 @@ bin/
 ```cmake
 # --- MyTool ---
 set(MYTOOL_SOURCES
-    src/tools/MyTool/MyTool.cpp
-    src/tools/MyTool/MyTool.h
+    tools/MyTool/MyTool.cpp
+    tools/MyTool/MyTool.h
 )
 
 add_library(MyTool SHARED ${MYTOOL_SOURCES})
@@ -123,21 +123,21 @@ set_target_properties(MyTool PROPERTIES
 # 复制 metadata.json
 add_custom_command(TARGET MyTool POST_BUILD
     COMMAND ${CMAKE_COMMAND} -E copy
-    "${CMAKE_CURRENT_SOURCE_DIR}/src/tools/MyTool/metadata.json"
+    "${CMAKE_CURRENT_SOURCE_DIR}/tools/MyTool/metadata.json"
     "$<TARGET_FILE_DIR:MyTool>/metadata.json"
 )
 
 # 复制本地化目录
 add_custom_command(TARGET MyTool POST_BUILD
     COMMAND ${CMAKE_COMMAND} -E copy_directory
-    "${CMAKE_CURRENT_SOURCE_DIR}/src/tools/MyTool/localization"
+    "${CMAKE_CURRENT_SOURCE_DIR}/tools/MyTool/localization"
     "$<TARGET_FILE_DIR:MyTool>/localization"
 )
 
 # 复制封面图（如果存在）
 add_custom_command(TARGET MyTool POST_BUILD
     COMMAND ${CMAKE_COMMAND} -E copy
-    "${CMAKE_CURRENT_SOURCE_DIR}/src/tools/MyTool/cover.png"
+    "${CMAKE_CURRENT_SOURCE_DIR}/tools/MyTool/cover.png"
     "$<TARGET_FILE_DIR:MyTool>/cover.png"
 )
 ```
@@ -217,7 +217,7 @@ add_custom_command(TARGET MyTool POST_BUILD
 ## 7. 开发新工具流程 (Workflow for New Tools)
 
 ### 7.1 创建步骤
-1. 在 `src/tools/` 下创建新目录（例如 `CharacterEditor`）。
+1. 在 `tools/` 下创建新目录（例如 `CharacterEditor`）。
 2. 创建头文件和实现文件：
    ```cpp
    // CharacterEditor.h
@@ -225,7 +225,7 @@ add_custom_command(TARGET MyTool POST_BUILD
    #define CHARACTEREDITOR_H
    
    #include <QObject>
-   #include "../../ToolInterface.h"
+   #include "../../src/ToolInterface.h"
    
    class CharacterEditor : public QObject, public ToolInterface {
        Q_OBJECT

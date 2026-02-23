@@ -59,7 +59,14 @@ void FileManagerTool::initialize() {
 }
 
 QWidget* FileManagerTool::createWidget(QWidget* parent) {
-    return new FileTreeWidget(parent);
+    m_treeWidget = new FileTreeWidget(parent);
+    return m_treeWidget;
+}
+
+void FileManagerTool::applyTheme() {
+    if (m_treeWidget) {
+        m_treeWidget->updateTheme();
+    }
 }
 
 void FileManagerTool::loadLanguage(const QString& lang) {

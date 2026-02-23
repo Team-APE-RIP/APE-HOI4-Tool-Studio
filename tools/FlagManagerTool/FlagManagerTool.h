@@ -17,7 +17,7 @@
 #include <QScrollArea>
 #include <QGridLayout>
 #include <QButtonGroup>
-#include "../../ToolInterface.h"
+#include "../../src/ToolInterface.h"
 
 class FlagManagerTool;
 class FlagManagerMainWidget;
@@ -123,6 +123,7 @@ public:
     void setSidebarList(QTreeWidget* list);
     void refreshData();
     void updateTexts();
+    void applyTheme();
 
 private slots:
     void onTagSelected(QTreeWidgetItem* item, int col);
@@ -134,6 +135,7 @@ private:
 
     FlagManagerTool* m_tool;
     QTreeWidget* m_tagList = nullptr;
+    QWidget* m_toolbar;
     QWidget* m_scrollContent;
     QScrollArea* m_scrollArea;
     QLabel* m_placeholder;
@@ -156,11 +158,14 @@ public:
     FlagConverterWidget* getConverter() const { return m_converter; }
     FlagBrowserWidget* getBrowser() const { return m_browser; }
     void updateTexts();
+    void applyTheme();
 
 private slots:
     void onModeChanged(int index);
 
 private:
+    void updateButtonStyles(int activeIndex);
+    
     FlagManagerTool* m_tool;
     QStackedWidget* m_stack;
     FlagConverterWidget* m_converter;
@@ -179,6 +184,7 @@ public:
     QTreeWidget* getList() const { return m_list; }
     void setMode(int mode);
     void updateTexts();
+    void applyTheme();
 
 private:
     FlagManagerTool* m_tool;
@@ -209,6 +215,7 @@ public:
     QWidget* createWidget(QWidget* parent = nullptr) override;
     QWidget* createSidebarWidget(QWidget* parent = nullptr) override;
     void loadLanguage(const QString& lang) override;
+    void applyTheme() override;
 
     void switchMode(int mode);
     QString getString(const QString& key);
