@@ -1,4 +1,5 @@
 {
+    "LoadingFiles": "Loading files...",
     "Settings": "Settings",
     "Config": "Configuration",
     "Tools": "Tools",
@@ -10,5 +11,7 @@
     "CloseConfirmTitle": "Close Application",
     "CloseConfirmMsg": "A tool is currently running. Are you sure you want to close the application? Unsaved changes may be lost.",
     "SwitchToolTitle": "Switch Tool",
-    "SwitchToolMsg": "A tool is currently running. Are you sure you want to switch to another tool? Unsaved changes may be lost."
+    "SwitchToolMsg": "A tool is currently running. Are you sure you want to switch to another tool? Unsaved changes may be lost.",
+    "ToolCrashedTitle": "Tool Crashed",
+    "ToolCrashedMsg": "Tool '%1' has crashed unexpectedly.\n\nError: %2\n\nThe main application remains stable. You can try launching the tool again."
 }

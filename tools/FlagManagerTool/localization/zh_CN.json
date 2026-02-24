@@ -1,6 +1,6 @@
 {
     "Name": "旗帜管理器",
-    "Description": "创建和管理国家旗帜。",
+    "Description": "管理和新建旗帜。",
     "TabManage": "管理",
     "TabNew": "新建",
     "Tags": "TAG",
@@ -8,9 +8,9 @@
     "FlagName": "旗帜名称:",
     "Crop": "裁切:",
     "Zoom": "缩放",
-    "ExportCurrent": "导出当前",
+    "Export": "导出当前",
     "ExportAll": "导出全部",
-    "ImportFiles": "导入",
+    "ImportFiles": "导入文件",
     "BrowserPlaceholder": "选择一个 TAG 以查看旗帜。",
     "NoImage": "无图片",
     "ColFlagName": "旗帜名",
@@ -21,5 +21,8 @@
     "B": "下",
     "SizeLarge": "大",
     "SizeMedium": "中",
-    "SizeSmall": "小"
+    "SizeSmall": "小",
+    "ErrorDuplicateName": "旗帜名称已存在",
+    "ErrorInvalidCrop": "裁切范围无效",
+    "RemoveFromList": "从列表移除"
 }

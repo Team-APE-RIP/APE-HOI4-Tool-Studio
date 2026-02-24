@@ -13,6 +13,7 @@
 #include "SettingsPage.h"
 #include "ConfigPage.h"
 #include "ToolsPage.h"
+#include "LoadingOverlay.h"
 
 class MainWindow : public QMainWindow {
     Q_OBJECT
@@ -25,6 +26,7 @@ protected:
     void mousePressEvent(QMouseEvent *event) override;
     void mouseMoveEvent(QMouseEvent *event) override;
     void mouseReleaseEvent(QMouseEvent *event) override;
+    void closeEvent(QCloseEvent *event) override;
     bool eventFilter(QObject *obj, QEvent *event) override;
 
 private slots:
@@ -42,6 +44,7 @@ private slots:
     void updateMemoryUsage();
     void onModClosed();
     void onPathInvalid(const QString& titleKey, const QString& msgKey); // Updated signature
+    void onToolProcessCrashed(const QString& toolId, const QString& error);
 
     // Window Controls
     void minimizeWindow();
@@ -89,6 +92,10 @@ private:
     // Debug Overlay
     QLabel *m_memUsageLabel;
     QTimer *m_memTimer;
+    
+    // Loading Overlay
+    LoadingOverlay *m_loadingOverlay;
+    QTimer *m_scanCheckTimer;
 
     // Dragging state
     bool m_dragging = false;

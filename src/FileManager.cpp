@@ -116,7 +116,9 @@ void FileManager::onScanFinished() {
         Logger::instance().logInfo("FileManager", QString("Scan finished. Total files: %1").arg(m_files.size()));
     } // Unlock mutex before emitting signal to avoid deadlock
     
+    Logger::instance().logInfo("FileManager", "Emitting scanFinished signal");
     emit scanFinished();
+    Logger::instance().logInfo("FileManager", "scanFinished signal emitted");
 }
 
 FileManager::ScanResult FileManager::doScan(const QString& gamePath, const QString& modPath, const QStringList& ignoreDirs) {
@@ -387,4 +389,64 @@ QStringList FileManager::getReplacePaths() const {
 int FileManager::getFileCount() const {
     QMutexLocker locker(&m_mutex);
     return m_files.size();
+}
+
+QJsonObject FileManager::toJson() const {
+    QMutexLocker locker(&m_mutex);
+    
+    QJsonObject obj;
+    
+    // Serialize files
+    QJsonObject filesObj;
+    for (auto it = m_files.begin(); it != m_files.end(); ++it) {
+        filesObj[it.key()] = it.value().toJson();
+    }
+    obj["files"] = filesObj;
+    
+    // Serialize replace paths
+    QJsonArray replacePathsArr;
+    for (const QString& path : m_replacePaths) {
+        replacePathsArr.append(path);
+    }
+    obj["replacePaths"] = replacePathsArr;
+    
+    return obj;
+}
+
+void FileManager::fromJson(const QJsonObject& obj, QMap<QString, FileDetails>& files, QStringList& replacePaths) {
+    files.clear();
+    replacePaths.clear();
+    
+    // Deserialize files
+    QJsonObject filesObj = obj["files"].toObject();
+    for (auto it = filesObj.begin(); it != filesObj.end(); ++it) {
+        files[it.key()] = FileDetails::fromJson(it.value().toObject());
+    }
+    
+    // Deserialize replace paths
+    QJsonArray replacePathsArr = obj["replacePaths"].toArray();
+    for (const QJsonValue& val : replacePathsArr) {
+        replacePaths.append(val.toString());
+    }
+}
+
+void FileManager::setFromJson(const QJsonObject& obj) {
+    QMutexLocker locker(&m_mutex);
+    
+    m_files.clear();
+    m_replacePaths.clear();
+    
+    // Deserialize files
+    QJsonObject filesObj = obj["files"].toObject();
+    for (auto it = filesObj.begin(); it != filesObj.end(); ++it) {
+        m_files[it.key()] = FileDetails::fromJson(it.value().toObject());
+    }
+    
+    // Deserialize replace paths
+    QJsonArray replacePathsArr = obj["replacePaths"].toArray();
+    for (const QJsonValue& val : replacePathsArr) {
+        m_replacePaths.insert(val.toString());
+    }
+    
+    Logger::instance().logInfo("FileManager", QString("Loaded %1 files from IPC data").arg(m_files.size()));
 }

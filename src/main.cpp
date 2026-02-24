@@ -2,6 +2,7 @@
 #include "SetupDialog.h"
 #include "ConfigManager.h"
 #include "LocalizationManager.h"
+#include "ToolHostMode.h"
 #include <QApplication>
 #include <QLocale>
 #include <QTranslator>
@@ -14,7 +15,25 @@ int main(int argc, char *argv[]) {
     a.setOrganizationName("Team APE-RIP");
     a.setApplicationVersion("1.0.0");
     
-    // Check if first run or no mod selected
+    // Check for tool host mode: --tool-host <server_name> <tool_dll_path> [tool_name] [--log-file <path>]
+    QStringList args = a.arguments();
+    if (args.size() >= 4 && args[1] == "--tool-host") {
+        // Run in tool host mode (as subprocess for a tool)
+        QString toolName = args.size() >= 5 ? args[4] : "Tool";
+        QString logFilePath;
+        
+        // Parse optional --log-file argument
+        int logFileIndex = args.indexOf("--log-file");
+        if (logFileIndex != -1 && logFileIndex + 1 < args.size()) {
+            logFilePath = args[logFileIndex + 1];
+        }
+        
+        a.setApplicationName(toolName);
+        a.setQuitOnLastWindowClosed(false);
+        return runToolHostMode(args[2], args[3], toolName, logFilePath);
+    }
+    
+    // Normal mode: run main application
     ConfigManager& config = ConfigManager::instance();
     
     // Load language immediately

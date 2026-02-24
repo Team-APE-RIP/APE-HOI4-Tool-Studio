@@ -149,3 +149,23 @@ bool ConfigManager::isFirstRun() const {
 bool ConfigManager::hasModSelected() const {
     return !m_modPath.isEmpty();
 }
+
+QJsonObject ConfigManager::toJson() const {
+    QJsonObject obj;
+    obj["gamePath"] = m_gamePath;
+    obj["modPath"] = m_modPath;
+    obj["language"] = m_language;
+    obj["theme"] = static_cast<int>(m_theme);
+    obj["debugMode"] = m_debugMode;
+    return obj;
+}
+
+void ConfigManager::setFromJson(const QJsonObject& obj) {
+    if (obj.contains("gamePath")) m_gamePath = obj["gamePath"].toString();
+    if (obj.contains("modPath")) m_modPath = obj["modPath"].toString();
+    if (obj.contains("language")) m_language = obj["language"].toString();
+    if (obj.contains("theme")) m_theme = static_cast<Theme>(obj["theme"].toInt());
+    if (obj.contains("debugMode")) m_debugMode = obj["debugMode"].toBool();
+    
+    Logger::instance().logInfo("ConfigManager", "Loaded config from IPC data");
+}

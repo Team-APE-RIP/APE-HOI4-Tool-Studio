@@ -1,16 +1,16 @@
 {
     "Name": "Flag Manager",
-    "Description": "Create and manage country flags.",
+    "Description": "Manage and create flags.",
     "TabManage": "Manage",
-    "TabNew": "New",
-    "Tags": "TAGs",
+    "TabNew": "Create",
+    "Tags": "TAG",
     "Files": "Files",
     "FlagName": "Flag Name:",
     "Crop": "Crop:",
     "Zoom": "Zoom",
-    "ExportCurrent": "Export Current",
+    "Export": "Export Current",
     "ExportAll": "Export All",
-    "ImportFiles": "Import",
+    "ImportFiles": "Import Files",
     "BrowserPlaceholder": "Select a TAG to view flags.",
     "NoImage": "No Image",
     "ColFlagName": "Flag Name",
@@ -21,5 +21,8 @@
     "B": "B",
     "SizeLarge": "Large",
     "SizeMedium": "Medium",
-    "SizeSmall": "Small"
+    "SizeSmall": "Small",
+    "ErrorDuplicateName": "Flag name already exists",
+    "ErrorInvalidCrop": "Invalid crop range",
+    "RemoveFromList": "Remove from List"
 }

@@ -17,6 +17,7 @@
 #include <QScrollArea>
 #include <QGridLayout>
 #include <QButtonGroup>
+#include <QMenu>
 #include "../../src/ToolInterface.h"
 
 class FlagManagerTool;
@@ -43,9 +44,11 @@ public:
     void setImage(const QImage& img);
     void setCrop(const QRect& crop);
     void setZoom(double zoom);
+    void setScrollArea(QScrollArea* sa);
     QRect getCrop() const { return m_crop; }
     QImage getImage() const { return m_image; }
     QSize sizeHint() const override;
+    QSize minimumSizeHint() const override;
 
 protected:
     void paintEvent(QPaintEvent* event) override;
@@ -64,6 +67,8 @@ private:
     double m_zoom = 1.0;
     bool m_dragging = false;
     QPoint m_lastMousePos;
+    QPoint m_imageOffset;
+    QScrollArea* m_scrollArea;
 };
 
 class FlagConverterWidget : public QWidget {
@@ -73,6 +78,15 @@ public:
     void addFiles(const QStringList& paths);
     void setSidebarList(QTreeWidget* list);
     void updateTexts();
+    void applyTheme();
+    static QImage loadImageFile(const QString& path);
+
+public slots:
+    void onExportCurrent();
+    void onExportAll();
+    void onImportClicked();
+    void onContextMenuRequested(const QPoint& pos);
+    void removeSelectedFile();
 
 protected:
     void dragEnterEvent(QDragEnterEvent* event) override;
@@ -81,10 +95,7 @@ protected:
 private slots:
     void onFileSelected();
     void onNameChanged(const QString& text);
-    void onZoomChanged(int value);
-    void onExportCurrent();
-    void onExportAll();
-    void onImportClicked();
+    void onCropChanged();
 
 private:
     struct FlagItem {
@@ -94,24 +105,27 @@ private:
         QRect crop;
     };
 
-    void exportItem(const FlagItem& item, const QString& baseDir);
+    bool exportItem(const FlagItem& item, const QString& baseDir);
+    void removeItem(const QString& path);
+    void selectFirstItem();
+    void clearPreview();
 
     FlagManagerTool* m_tool;
     QTreeWidget* m_fileList = nullptr;
     QMap<QString, FlagItem> m_items;
     QString m_currentPath;
+    int m_currentZoom = 100;
 
     ImagePreviewWidget* m_preview;
-    QLabel* m_zoomLabel;
     QLabel* m_nameLabel;
     QLabel* m_cropLabel;
     QLabel *m_labelL, *m_labelT, *m_labelR, *m_labelB;
-    QPushButton* m_exportBtn;
-    QPushButton* m_exportAllBtn;
-    QPushButton* m_importBtn;
     QLineEdit* m_nameEdit;
     QLineEdit* m_cropLeft, *m_cropTop, *m_cropRight, *m_cropBottom;
-    QSlider* m_zoomSlider;
+    
+    // 用于主题切换
+    QWidget* m_previewContainer = nullptr;
+    QWidget* m_controlPanel = nullptr;
 };
 
 // --- Browser Widgets ---
@@ -125,9 +139,11 @@ public:
     void updateTexts();
     void applyTheme();
 
+public slots:
+    void setSizeIndex(int index);
+
 private slots:
     void onTagSelected(QTreeWidgetItem* item, int col);
-    void onSizeChanged(int id); // 0=Large, 1=Medium, 2=Small
 
 private:
     void updateFlagDisplay();
@@ -135,13 +151,10 @@ private:
 
     FlagManagerTool* m_tool;
     QTreeWidget* m_tagList = nullptr;
-    QWidget* m_toolbar;
     QWidget* m_scrollContent;
     QScrollArea* m_scrollArea;
     QLabel* m_placeholder;
     
-    QButtonGroup* m_sizeGroup;
-    QPushButton* m_sizeBtns[3];
     int m_currentSizeIndex = 0; // 0=Large
     
     QString m_selectedTag;
@@ -162,9 +175,11 @@ public:
 
 private slots:
     void onModeChanged(int index);
+    void onSizeChanged(int id);
 
 private:
     void updateButtonStyles(int activeIndex);
+    void updateToolbarVisibility(int modeIndex);
     
     FlagManagerTool* m_tool;
     QStackedWidget* m_stack;
@@ -173,6 +188,17 @@ private:
     QWidget* m_tabBar;
     QPushButton* m_browserBtn;
     QPushButton* m_converterBtn;
+    
+    // 管理模式的尺寸按钮
+    QWidget* m_sizeContainer;
+    QButtonGroup* m_sizeGroup;
+    QPushButton* m_sizeBtns[3];
+    
+    // 新建模式的导入导出按钮
+    QWidget* m_actionContainer;
+    QPushButton* m_importBtn;
+    QPushButton* m_exportBtn;
+    QPushButton* m_exportAllBtn;
 };
 
 // --- Sidebar ---

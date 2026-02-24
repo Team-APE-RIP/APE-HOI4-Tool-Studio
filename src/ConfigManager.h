@@ -48,6 +48,10 @@ public:
 
     bool isFirstRun() const;
     bool hasModSelected() const;
+    
+    // Serialization for IPC
+    QJsonObject toJson() const;
+    void setFromJson(const QJsonObject& obj); // For ToolHost to initialize from IPC data
 
 signals:
     void themeChanged(Theme theme);

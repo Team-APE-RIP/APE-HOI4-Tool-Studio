@@ -7,6 +7,7 @@
 #include "FileManager.h"
 #include "TagManager.h"
 #include "ToolManager.h"
+#include "ToolProxyInterface.h"
 #include "Logger.h"
 #include <QHBoxLayout>
 #include <QVBoxLayout>
@@ -16,6 +17,7 @@
 #include <QApplication>
 #include <QStyle>
 #include <QPropertyAnimation>
+#include <QCloseEvent>
 #include <windows.h>
 #include <psapi.h>
 
@@ -42,14 +44,37 @@ MainWindow::MainWindow(QWidget *parent)
     PathValidator::instance().startMonitoring();
     connect(&PathValidator::instance(), &PathValidator::pathInvalid, this, &MainWindow::onPathInvalid);
 
-    // Start File Scanning
-    FileManager::instance().startScanning();
+    // Setup Loading Overlay
+    m_loadingOverlay = new LoadingOverlay(m_centralWidget);
+    LocalizationManager& loc = LocalizationManager::instance();
+    m_loadingOverlay->setMessage(loc.getString("MainWindow", "LoadingFiles"));
+    
+    // Setup scan check timer - poll every 500ms to check if scanning is complete
+    m_scanCheckTimer = new QTimer(this);
+    m_scanCheckTimer->setInterval(500);
+    connect(m_scanCheckTimer, &QTimer::timeout, this, [this]() {
+        if (!FileManager::instance().isScanning()) {
+            Logger::instance().logInfo("MainWindow", "Scan complete detected via polling - hiding overlay");
+            m_scanCheckTimer->stop();
+            m_loadingOverlay->hideOverlay();
+        }
+    });
+    
+    // Show overlay and start scanning (delayed to ensure UI is ready)
+    QTimer::singleShot(100, this, [this]() {
+        m_loadingOverlay->showOverlay();
+        m_scanCheckTimer->start();
+        FileManager::instance().startScanning();
+    });
 
     // Initialize TagManager (it will listen to FileManager scan events)
     TagManager::instance();
 
     // Load Tools
     ToolManager::instance().loadTools();
+    // Connect tool crash signal
+    connect(&ToolManager::instance(), &ToolManager::toolProcessCrashed, 
+            this, &MainWindow::onToolProcessCrashed);
     // Force refresh tools page to ensure UI is updated after loading
     m_toolsPage->refreshTools();
     
@@ -487,6 +512,19 @@ void MainWindow::onToolSelected(const QString &toolId) {
             loc.getString("MainWindow", "SwitchToolTitle"),
             loc.getString("MainWindow", "SwitchToolMsg"));
         if (reply != QMessageBox::Yes) return;
+        
+        // Stop the currently active tool process before switching - use async kill
+        Logger::instance().logInfo("MainWindow", "Stopping current tool before switching...");
+        // Just kill the process directly without waiting
+        QList<ToolInterface*> tools = ToolManager::instance().getTools();
+        for (ToolInterface* t : tools) {
+            ToolProxyInterface* proxy = dynamic_cast<ToolProxyInterface*>(t);
+            if (proxy && proxy->isProcessRunning()) {
+                // Force kill without waiting
+                proxy->forceKillProcess();
+            }
+        }
+        ToolManager::instance().setToolActive(false);
     }
 
     ToolInterface* tool = ToolManager::instance().getTool(toolId);
@@ -500,13 +538,19 @@ void MainWindow::onToolSelected(const QString &toolId) {
     // Clear current dashboard content
     QLayoutItem *child;
     while ((child = m_dashboardContent->layout()->takeAt(0)) != nullptr) {
-        delete child->widget();
+        if (child->widget()) {
+            child->widget()->hide();
+            child->widget()->deleteLater();
+        }
         delete child;
     }
     
     // Clear right sidebar
     while ((child = m_rightSidebar->layout()->takeAt(0)) != nullptr) {
-        delete child->widget();
+        if (child->widget()) {
+            child->widget()->hide();
+            child->widget()->deleteLater();
+        }
         delete child;
     }
     m_rightSidebar->hide();
@@ -709,4 +753,41 @@ void MainWindow::mouseMoveEvent(QMouseEvent *event) {
 }
 void MainWindow::mouseReleaseEvent(QMouseEvent *event) {
     m_dragging = false;
+}
+
+void MainWindow::closeEvent(QCloseEvent *event) {
+    // Stop all tool processes before closing
+    ToolManager::instance().unloadTools();
+    event->accept();
+}
+
+void MainWindow::onToolProcessCrashed(const QString& toolId, const QString& error) {
+    Logger::instance().logError("MainWindow", QString("Tool %1 crashed: %2").arg(toolId, error));
+    
+    // Clear dashboard content
+    QLayoutItem *child;
+    while ((child = m_dashboardContent->layout()->takeAt(0)) != nullptr) {
+        delete child->widget();
+        delete child;
+    }
+    
+    // Clear right sidebar
+    while ((child = m_rightSidebar->layout()->takeAt(0)) != nullptr) {
+        delete child->widget();
+        delete child;
+    }
+    m_rightSidebar->hide();
+    
+    // Restore default dashboard
+    QLabel *dashLabel = new QLabel("Dashboard Area", m_dashboardContent);
+    dashLabel->setAlignment(Qt::AlignCenter);
+    m_dashboardContent->layout()->addWidget(dashLabel);
+    
+    ToolManager::instance().setToolActive(false);
+    
+    // Show error message to user
+    LocalizationManager& loc = LocalizationManager::instance();
+    CustomMessageBox::information(this, 
+        loc.getString("MainWindow", "ToolCrashedTitle"),
+        loc.getString("MainWindow", "ToolCrashedMsg").arg(toolId).arg(error));
 }

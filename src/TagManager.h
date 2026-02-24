@@ -5,6 +5,7 @@
 #include <QMap>
 #include <QString>
 #include <QMutex>
+#include <QJsonObject>
 
 class TagManager : public QObject {
     Q_OBJECT
@@ -17,6 +18,10 @@ public:
     
     // Manually trigger a scan (usually called automatically after FileManager scan)
     void scanTags();
+    
+    // Serialization for IPC
+    QJsonObject toJson() const;
+    void setFromJson(const QJsonObject& obj); // For ToolHost to initialize from IPC data
 
 signals:
     void tagsUpdated();

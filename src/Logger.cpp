@@ -7,6 +7,7 @@
 #include <QDesktopServices>
 #include <QUrl>
 #include <QFileInfoList>
+#include <QMutexLocker>
 #include <algorithm>
 
 Logger& Logger::instance() {
@@ -14,35 +15,82 @@ Logger& Logger::instance() {
     return instance;
 }
 
-Logger::Logger() {
-    // Clean old logs before creating a new one
-    cleanOldLogs();
-
-    QString logDir = QStandardPaths::writableLocation(QStandardPaths::TempLocation) + "/APE-HOI4-Tool-Studio/logs";
-    
-    QDir dir(logDir);
-    if (!dir.exists()) {
-        dir.mkpath(".");
-    }
-
-    QString fileName = QString("log_%1.txt").arg(QDateTime::currentDateTime().toString("yyyyMMdd_HHmmss"));
-    m_logFile.setFileName(dir.filePath(fileName));
-    
-    if (m_logFile.open(QIODevice::WriteOnly | QIODevice::Append | QIODevice::Text)) {
-        m_stream.setDevice(&m_logFile);
-        m_stream.setEncoding(QStringConverter::Utf8);
-    } else {
-        qDebug() << "Failed to open log file:" << m_logFile.fileName();
-    }
+Logger::Logger() : m_initialized(false) {
+    // Don't initialize here - wait for setLogFilePath or first log call
 }
 
 Logger::~Logger() {
+    QMutexLocker locker(&m_mutex);
     if (m_logFile.isOpen()) {
         m_logFile.close();
     }
 }
 
+void Logger::setLogFilePath(const QString& path) {
+    QMutexLocker locker(&m_mutex);
+    
+    // Close existing file if open
+    if (m_logFile.isOpen()) {
+        m_logFile.close();
+    }
+    
+    m_logFilePath = path;
+    m_initialized = false;
+    
+    // Initialize with the new path
+    locker.unlock();
+    initLogFile();
+}
+
+QString Logger::logFilePath() const {
+    return m_logFilePath;
+}
+
+void Logger::initLogFile() {
+    QMutexLocker locker(&m_mutex);
+    
+    if (m_initialized && m_logFile.isOpen()) {
+        return;
+    }
+    
+    // If no path set, create default path
+    if (m_logFilePath.isEmpty()) {
+        // Clean old logs before creating a new one
+        locker.unlock();
+        cleanOldLogs();
+        locker.relock();
+        
+        QString logDir = QStandardPaths::writableLocation(QStandardPaths::TempLocation) + "/APE-HOI4-Tool-Studio/logs";
+        
+        QDir dir(logDir);
+        if (!dir.exists()) {
+            dir.mkpath(".");
+        }
+
+        QString fileName = QString("log_%1.txt").arg(QDateTime::currentDateTime().toString("yyyyMMdd_HHmmss"));
+        m_logFilePath = dir.filePath(fileName);
+    }
+    
+    m_logFile.setFileName(m_logFilePath);
+    
+    // Open in append mode to allow multiple processes to write
+    if (m_logFile.open(QIODevice::WriteOnly | QIODevice::Append | QIODevice::Text)) {
+        m_stream.setDevice(&m_logFile);
+        m_stream.setEncoding(QStringConverter::Utf8);
+        m_initialized = true;
+    } else {
+        qDebug() << "Failed to open log file:" << m_logFilePath;
+    }
+}
+
 void Logger::write(const QString& type, const QString& context, const QString& message) {
+    // Ensure log file is initialized
+    if (!m_initialized) {
+        initLogFile();
+    }
+    
+    QMutexLocker locker(&m_mutex);
+    
     if (!m_logFile.isOpen()) return;
 
     QString time = QDateTime::currentDateTime().toString("yyyy-MM-dd HH:mm:ss.zzz");
@@ -86,11 +134,9 @@ void Logger::cleanOldLogs() {
 
     QFileInfoList files = dir.entryInfoList(QStringList() << "log_*.txt", QDir::Files, QDir::Time);
     
-    // Files are sorted by time (newest first due to QDir::Time default if not specified otherwise, 
-    // but actually it's usually newest first in entryInfoList if we want latest)
-    // Let's be explicit.
+    // Sort by time (newest first)
     std::sort(files.begin(), files.end(), [](const QFileInfo& a, const QFileInfo& b) {
-        return a.lastModified() > b.lastModified(); // Newest first
+        return a.lastModified() > b.lastModified();
     });
 
     if (files.size() > maxFiles) {

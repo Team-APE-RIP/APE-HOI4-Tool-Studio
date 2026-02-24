@@ -11,11 +11,27 @@
 #include <QFuture>
 #include <QFutureWatcher>
 #include <QDateTime>
+#include <QJsonObject>
+#include <QJsonArray>
 #include "RecursiveFileSystemWatcher.h"
 
 struct FileDetails {
     QString absPath;
     QString source; // "Game", "Mod", "DLC"
+    
+    QJsonObject toJson() const {
+        QJsonObject obj;
+        obj["absPath"] = absPath;
+        obj["source"] = source;
+        return obj;
+    }
+    
+    static FileDetails fromJson(const QJsonObject& obj) {
+        FileDetails fd;
+        fd.absPath = obj["absPath"].toString();
+        fd.source = obj["source"].toString();
+        return fd;
+    }
 };
 
 class FileManager : public QObject {
@@ -30,6 +46,12 @@ public:
     QMap<QString, FileDetails> getEffectiveFiles() const;
     QStringList getReplacePaths() const;
     int getFileCount() const;
+    bool isScanning() const { return m_isScanning; }
+    
+    // Serialization for IPC
+    QJsonObject toJson() const;
+    static void fromJson(const QJsonObject& obj, QMap<QString, FileDetails>& files, QStringList& replacePaths);
+    void setFromJson(const QJsonObject& obj); // For ToolHost to initialize from IPC data
 
 signals:
     void scanStarted();

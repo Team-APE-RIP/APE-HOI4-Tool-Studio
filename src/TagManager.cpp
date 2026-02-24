@@ -5,6 +5,7 @@
 #include <QTextStream>
 #include <QRegularExpression>
 #include <QDebug>
+#include <QJsonObject>
 
 TagManager::TagManager() {
     connect(&FileManager::instance(), &FileManager::scanFinished, this, &TagManager::onFileScanFinished);
@@ -22,6 +23,24 @@ void TagManager::onFileScanFinished() {
 QMap<QString, QString> TagManager::getTags() const {
     QMutexLocker locker(&m_mutex);
     return m_tags;
+}
+
+QJsonObject TagManager::toJson() const {
+    QMutexLocker locker(&m_mutex);
+    QJsonObject obj;
+    for (auto it = m_tags.begin(); it != m_tags.end(); ++it) {
+        obj[it.key()] = it.value();
+    }
+    return obj;
+}
+
+void TagManager::setFromJson(const QJsonObject& obj) {
+    QMutexLocker locker(&m_mutex);
+    m_tags.clear();
+    for (auto it = obj.begin(); it != obj.end(); ++it) {
+        m_tags[it.key()] = it.value().toString();
+    }
+    Logger::instance().logInfo("TagManager", QString("Loaded %1 tags from IPC data").arg(m_tags.size()));
 }
 
 void TagManager::scanTags() {

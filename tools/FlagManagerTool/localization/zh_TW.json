@@ -1,6 +1,6 @@
 {
     "Name": "旗幟管理器",
-    "Description": "建立和管理國家旗幟。",
+    "Description": "管理和新建旗幟。",
     "TabManage": "管理",
     "TabNew": "新建",
     "Tags": "TAG",
@@ -8,9 +8,9 @@
     "FlagName": "旗幟名稱:",
     "Crop": "裁切:",
     "Zoom": "縮放",
-    "ExportCurrent": "匯出目前",
+    "Export": "匯出當前",
     "ExportAll": "匯出全部",
-    "ImportFiles": "匯入",
+    "ImportFiles": "匯入檔案",
     "BrowserPlaceholder": "選擇一個 TAG 以檢視旗幟。",
     "NoImage": "無圖片",
     "ColFlagName": "旗幟名",
@@ -21,5 +21,8 @@
     "B": "下",
     "SizeLarge": "大",
     "SizeMedium": "中",
-    "SizeSmall": "小"
+    "SizeSmall": "小",
+    "ErrorDuplicateName": "旗幟名稱已存在",
+    "ErrorInvalidCrop": "裁切範圍無效",
+    "RemoveFromList": "從列表移除"
 }

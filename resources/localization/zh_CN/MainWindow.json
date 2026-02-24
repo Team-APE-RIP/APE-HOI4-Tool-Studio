@@ -1,4 +1,5 @@
 {
+    "LoadingFiles": "正在加载文件...",
     "Settings": "设置",
     "Config": "配置",
     "Tools": "工具",
@@ -10,5 +11,7 @@
     "CloseConfirmTitle": "关闭应用",
     "CloseConfirmMsg": "当前有工具正在运行。确定要关闭应用程序吗？未保存的更改可能会丢失。",
     "SwitchToolTitle": "切换工具",
-    "SwitchToolMsg": "当前有工具正在运行。确定要切换到另一个工具吗？未保存的更改可能会丢失。"
+    "SwitchToolMsg": "当前有工具正在运行。确定要切换到另一个工具吗？未保存的更改可能会丢失。",
+    "ToolCrashedTitle": "工具崩溃",
+    "ToolCrashedMsg": "工具 '%1' 意外崩溃。\n\n错误: %2\n\n主程序仍然稳定运行。您可以尝试重新启动该工具。"
 }
