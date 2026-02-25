@@ -234,8 +234,8 @@ void MainWindow::setupSidebar() {
     // App Icon & Title (Expanded)
     m_titleLayout = new QHBoxLayout();
     m_appIcon = new QLabel();
-    m_appIcon->setPixmap(QIcon(":/app.ico").pixmap(32, 32));
-    m_appIcon->setFixedSize(32, 32);
+    m_appIcon->setPixmap(QIcon(":/app.ico").pixmap(40, 40));
+    m_appIcon->setFixedSize(40, 40);
     m_appIcon->setAlignment(Qt::AlignCenter);
     
     m_appTitle = new QLabel("APE HOI4\nTool Studio");
@@ -278,8 +278,8 @@ void MainWindow::setupSidebar() {
 
     // Bottom App Icon (Collapsed)
     m_bottomAppIcon = new QLabel();
-    m_bottomAppIcon->setPixmap(QIcon(":/app.ico").pixmap(32, 32));
-    m_bottomAppIcon->setFixedSize(32, 32);
+    m_bottomAppIcon->setPixmap(QIcon(":/app.ico").pixmap(40, 40));
+    m_bottomAppIcon->setFixedSize(40, 40);
     m_bottomAppIcon->setAlignment(Qt::AlignCenter);
     m_bottomAppIcon->hide(); // Initially hidden
     
@@ -399,6 +399,33 @@ void MainWindow::applyTheme() {
         
         QSplitter::handle {
             background-color: %4;
+        }
+        
+        /* Mac-style context menu */
+        QMenu {
+            background-color: %5;
+            border: 1px solid %4;
+            border-radius: 6px;
+            padding: 4px 0px;
+        }
+        QMenu::item {
+            padding: 6px 20px;
+            color: %3;
+            background-color: transparent;
+        }
+        QMenu::item:selected {
+            background-color: #007AFF;
+            color: white;
+            border-radius: 4px;
+            margin: 2px 4px;
+        }
+        QMenu::item:disabled {
+            color: #888888;
+        }
+        QMenu::separator {
+            height: 1px;
+            background-color: %4;
+            margin: 4px 8px;
         }
         
         /* Mac-style scrollbar */

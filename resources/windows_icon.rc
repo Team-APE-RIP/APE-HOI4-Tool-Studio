@@ -1,1 +1,31 @@
-IDI_ICON1 ICON "app.ico"
+#include <windows.h>
+
+IDI_ICON1 ICON "../resources/app.ico"
+
+VS_VERSION_INFO VERSIONINFO
+FILEVERSION 1,0,2,0
+PRODUCTVERSION 1,0,2,0
+FILEFLAGSMASK 0x3fL
+FILEFLAGS 0x0L
+FILEOS VOS_NT_WINDOWS32
+FILETYPE VFT_APP
+FILESUBTYPE VFT2_UNKNOWN
+BEGIN
+    BLOCK "StringFileInfo"
+    BEGIN
+        BLOCK "000004b0"
+        BEGIN
+            VALUE "FileDescription", "APE HOI4 Tool Studio"
+            VALUE "FileVersion", "1.0.2.0"
+            VALUE "InternalName", "APEHOI4ToolStudio"
+            VALUE "LegalCopyright", "Copyright © 2026 Team APE:RIP"
+            VALUE "OriginalFilename", "APEHOI4ToolStudio.exe"
+            VALUE "ProductName", "APE HOI4 Tool Studio"
+            VALUE "ProductVersion", "1.0.2.0"
+        END
+    END
+    BLOCK "VarFileInfo"
+    BEGIN
+        VALUE "Translation", 0x0000, 0x04B0
+    END
+END

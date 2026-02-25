@@ -16,7 +16,7 @@ LoadingOverlay::LoadingOverlay(QWidget *parent)
     // Container for content
     m_container = new QWidget(this);
     m_container->setObjectName("LoadingContainer");
-    m_container->setFixedSize(300, 150);
+    m_container->setFixedSize(350, 400);
     
     QVBoxLayout *layout = new QVBoxLayout(m_container);
     layout->setContentsMargins(30, 25, 30, 25);
@@ -25,7 +25,7 @@ LoadingOverlay::LoadingOverlay(QWidget *parent)
     
     // Icon
     m_iconLabel = new QLabel(m_container);
-    m_iconLabel->setPixmap(QIcon(":/app.ico").pixmap(48, 48));
+    m_iconLabel->setPixmap(QPixmap(":/app.ico"));
     m_iconLabel->setAlignment(Qt::AlignCenter);
     layout->addWidget(m_iconLabel);
     

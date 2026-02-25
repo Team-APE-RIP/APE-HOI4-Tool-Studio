@@ -239,7 +239,7 @@ void ToolsPage::updateTheme() {
     QString cardBg = isDark ? "#3A3A3C" : "#FFFFFF";
     QString cardBorder = isDark ? "#4A4A4C" : "#E0E0E2";
     QString cardHover = isDark ? "#4A4A4C" : "#F5F5F7";
-    QString titleBg = isDark ? "#2C2C2E" : "#F0F0F2";
+    QString titleBg = isDark ? "#1C1C1E" : "#F0F0F2";
     QString titleText = isDark ? "#FFFFFF" : "#1D1D1F";
     QString placeholderBg = isDark ? "#2C2C2E" : "#E8E8EA";
     QString placeholderText = isDark ? "#888888" : "#666666";

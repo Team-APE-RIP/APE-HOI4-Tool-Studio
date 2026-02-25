@@ -127,7 +127,7 @@ void SettingsPage::setupUi() {
     QHBoxLayout *infoLayout = new QHBoxLayout();
     QLabel *appName = new QLabel("APE HOI4 Tool Studio");
     appName->setStyleSheet("font-weight: bold; font-size: 16px;");
-    m_versionLabel = new QLabel("v1.0.0");
+    m_versionLabel = new QLabel(QString("v%1").arg(APP_VERSION));
     infoLayout->addWidget(appName);
     infoLayout->addStretch();
     infoLayout->addWidget(m_versionLabel);

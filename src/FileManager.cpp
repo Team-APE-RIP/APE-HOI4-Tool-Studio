@@ -180,6 +180,8 @@ void FileManager::scanGameDirectory(const QString& gamePath, const QStringList& 
         
         if (subDir.contains("pdx", Qt::CaseInsensitive) ||
             subDir.contains("steam", Qt::CaseInsensitive) ||
+            subDir.contains("cline", Qt::CaseInsensitive) ||
+            subDir.contains("git", Qt::CaseInsensitive) ||
             subDir.contains("wiki", Qt::CaseInsensitive) ||
             subDir.contains("tools", Qt::CaseInsensitive) ||
             subDir.contains("test", Qt::CaseInsensitive) ||
