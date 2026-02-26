@@ -30,7 +30,7 @@ FileManager::FileManager() {
     
     m_debounceTimer = new QTimer(this);
     m_debounceTimer->setSingleShot(true);
-    m_debounceTimer->setInterval(2000); // 2 seconds debounce
+    m_debounceTimer->setInterval(50); // 2--0.05 seconds debounce
     connect(m_debounceTimer, &QTimer::timeout, this, &FileManager::onDebounceTimerTimeout);
     
     m_futureWatcher = new QFutureWatcher<ScanResult>(this);
@@ -319,6 +319,9 @@ bool FileManager::isIgnoredFile(const QString& absPath, const QString& relPath, 
 
     // Rule 1: Block .pdf
     if (suffix == "pdf") return true;
+
+    // N Rule 1: Block .md
+    if (suffix == "md") return true;
 
     // Rule 3: Block .dlc and thumbnail.png
     if (suffix == "dlc") return true;

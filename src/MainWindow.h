@@ -96,6 +96,9 @@ private:
     // Loading Overlay
     LoadingOverlay *m_loadingOverlay;
     QTimer *m_scanCheckTimer;
+    
+    // Sidebar collapse delay timer
+    QTimer *m_sidebarCollapseTimer;
 
     // Dragging state
     bool m_dragging = false;

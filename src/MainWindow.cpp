@@ -40,6 +40,12 @@ MainWindow::MainWindow(QWidget *parent)
 
     m_sidebar->installEventFilter(this);
 
+    // Setup sidebar collapse delay timer (1.5 seconds)
+    m_sidebarCollapseTimer = new QTimer(this);
+    m_sidebarCollapseTimer->setSingleShot(true);
+    m_sidebarCollapseTimer->setInterval(500); // Change from 1500 to 500
+    connect(m_sidebarCollapseTimer, &QTimer::timeout, this, &MainWindow::collapseSidebar);
+
     // Start Path Monitoring
     PathValidator::instance().startMonitoring();
     connect(&PathValidator::instance(), &PathValidator::pathInvalid, this, &MainWindow::onPathInvalid);
@@ -320,7 +326,7 @@ void MainWindow::applyTheme() {
     ConfigManager::Theme theme = ConfigManager::instance().getTheme();
     bool isDark = (theme == ConfigManager::Theme::Dark);
     
-    QString bg = isDark ? "#1C1C1E" : "#FFFFFF";
+    QString bg = isDark ? "#2C2C2E" : "#F5F5F7";
     QString sidebarBg = isDark ? "#2C2C2E" : "#F5F5F7";
     QString text = isDark ? "#FFFFFF" : "#1D1D1F";
     QString border = isDark ? "#3A3A3C" : "#D2D2D7";
@@ -757,9 +763,12 @@ void MainWindow::collapseSidebar() {
 bool MainWindow::eventFilter(QObject *obj, QEvent *event) {
     if (obj == m_sidebar && ConfigManager::instance().getSidebarCompactMode()) {
         if (event->type() == QEvent::Enter) {
+            // Stop collapse timer if running, then expand
+            m_sidebarCollapseTimer->stop();
             expandSidebar();
         } else if (event->type() == QEvent::Leave) {
-            collapseSidebar();
+            // Start 1.5 second delay timer before collapsing
+            m_sidebarCollapseTimer->start();
         }
     }
     return QMainWindow::eventFilter(obj, event);
