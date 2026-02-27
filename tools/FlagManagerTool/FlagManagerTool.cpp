@@ -33,6 +33,7 @@
 #include <windows.h>
 #include <wincodec.h>
 #include <comdef.h>
+#include <DirectXTex.h>
 #pragma comment(lib, "windowscodecs.lib")
 #pragma comment(lib, "ole32.lib")
 #endif
@@ -676,7 +677,77 @@ void FlagConverterWidget::fillNameFromFileName() {
     }
 }
 
-// 使用 Windows WIC 加载图片（支持 DDS, WebP, JXR 等格式）
+// 使用 DirectXTex 加载 DDS 文件
+#ifdef Q_OS_WIN
+static QImage loadDdsWithDirectXTex(const QString& path) {
+    QImage result;
+    
+    std::wstring wpath = path.toStdWString();
+    
+    DirectX::TexMetadata metadata;
+    DirectX::ScratchImage scratchImage;
+    
+    // 加载 DDS 文件
+    HRESULT hr = DirectX::LoadFromDDSFile(wpath.c_str(), DirectX::DDS_FLAGS_NONE, &metadata, scratchImage);
+    if (FAILED(hr)) {
+        return result;
+    }
+    
+    // 如果是压缩格式，需要解压
+    DirectX::ScratchImage decompressedImage;
+    const DirectX::Image* srcImage = scratchImage.GetImage(0, 0, 0);
+    
+    if (DirectX::IsCompressed(metadata.format)) {
+        hr = DirectX::Decompress(*srcImage, DXGI_FORMAT_R8G8B8A8_UNORM, decompressedImage);
+        if (FAILED(hr)) {
+            return result;
+        }
+        srcImage = decompressedImage.GetImage(0, 0, 0);
+    }
+    
+    // 转换为 RGBA8 格式（如果还不是）
+    DirectX::ScratchImage convertedImage;
+    if (srcImage->format != DXGI_FORMAT_R8G8B8A8_UNORM && srcImage->format != DXGI_FORMAT_B8G8R8A8_UNORM) {
+        hr = DirectX::Convert(*srcImage, DXGI_FORMAT_R8G8B8A8_UNORM, DirectX::TEX_FILTER_DEFAULT, DirectX::TEX_THRESHOLD_DEFAULT, convertedImage);
+        if (FAILED(hr)) {
+            return result;
+        }
+        srcImage = convertedImage.GetImage(0, 0, 0);
+    }
+    
+    // 创建 QImage
+    int width = static_cast<int>(srcImage->width);
+    int height = static_cast<int>(srcImage->height);
+    
+    if (srcImage->format == DXGI_FORMAT_B8G8R8A8_UNORM) {
+        // BGRA 格式可以直接使用
+        result = QImage(width, height, QImage::Format_ARGB32);
+        for (int y = 0; y < height; ++y) {
+            const uint8_t* srcRow = srcImage->pixels + y * srcImage->rowPitch;
+            QRgb* destRow = reinterpret_cast<QRgb*>(result.scanLine(y));
+            memcpy(destRow, srcRow, width * 4);
+        }
+    } else {
+        // RGBA 格式需要转换为 BGRA
+        result = QImage(width, height, QImage::Format_ARGB32);
+        for (int y = 0; y < height; ++y) {
+            const uint8_t* srcRow = srcImage->pixels + y * srcImage->rowPitch;
+            QRgb* destRow = reinterpret_cast<QRgb*>(result.scanLine(y));
+            for (int x = 0; x < width; ++x) {
+                uint8_t r = srcRow[x * 4 + 0];
+                uint8_t g = srcRow[x * 4 + 1];
+                uint8_t b = srcRow[x * 4 + 2];
+                uint8_t a = srcRow[x * 4 + 3];
+                destRow[x] = qRgba(r, g, b, a);
+            }
+        }
+    }
+    
+    return result;
+}
+#endif
+
+// 使用 Windows WIC 加载图片（支持 WebP, JXR 等格式）
 #ifdef Q_OS_WIN
 static QImage loadImageWithWIC(const QString& path) {
     QImage result;
@@ -748,9 +819,15 @@ static QImage loadImageWithWIC(const QString& path) {
 QImage FlagConverterWidget::loadImageFile(const QString& path) {
     QString ext = QFileInfo(path).suffix().toLower();
     
-    // 对于 DDS, WebP, JXR 格式，使用 Windows WIC API
 #ifdef Q_OS_WIN
-    if (ext == "dds" || ext == "webp" || ext == "jxr" || ext == "wdp" || ext == "hdp") {
+    // 对于 DDS 格式，使用 DirectXTex
+    if (ext == "dds") {
+        QImage img = loadDdsWithDirectXTex(path);
+        if (!img.isNull()) return img;
+    }
+    
+    // 对于 WebP, JXR 格式，使用 Windows WIC API
+    if (ext == "webp" || ext == "jxr" || ext == "wdp" || ext == "hdp") {
         QImage img = loadImageWithWIC(path);
         if (!img.isNull()) return img;
     }

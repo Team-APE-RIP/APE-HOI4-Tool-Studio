@@ -134,12 +134,39 @@ set(FLAGMANAGER_TOOL_SOURCES
     tools/FlagManagerTool/FlagManagerTool.h
 )
 
-add_library(FlagManagerTool SHARED ${FLAGMANAGER_TOOL_SOURCES})
+# DirectXTex library sources for DDS support
+set(DIRECTXTEX_SOURCES
+    libs/DirectXTex/DirectXTexImage.cpp
+    libs/DirectXTex/DirectXTexDDS.cpp
+    libs/DirectXTex/DirectXTexUtil.cpp
+    libs/DirectXTex/DirectXTexConvert.cpp
+    libs/DirectXTex/DirectXTexCompress.cpp
+    libs/DirectXTex/DirectXTexMisc.cpp
+    libs/DirectXTex/DirectXTexMipmaps.cpp
+    libs/DirectXTex/BC.cpp
+    libs/DirectXTex/BC4BC5.cpp
+    libs/DirectXTex/BC6HBC7.cpp
+)
+
+add_library(FlagManagerTool SHARED ${FLAGMANAGER_TOOL_SOURCES} ${DIRECTXTEX_SOURCES})
+
+# Suppress DirectXTex warnings for GCC/MinGW (affects all files including DirectXTex.h)
+if(CMAKE_CXX_COMPILER_ID STREQUAL "GNU" OR CMAKE_CXX_COMPILER_ID STREQUAL "Clang")
+    target_compile_options(FlagManagerTool PRIVATE -Wno-ignored-attributes)
+endif()
+
+# Add DirectXTex and DirectXMath include paths
+target_include_directories(FlagManagerTool PRIVATE 
+    ${CMAKE_CURRENT_SOURCE_DIR}/libs/DirectXTex
+    ${CMAKE_CURRENT_SOURCE_DIR}/libs/DirectXMath
+)
+
 target_link_libraries(FlagManagerTool PRIVATE Qt6::Core Qt6::Gui Qt6::Widgets APEHOI4Core)
 
-# Link Windows WIC libraries for DDS/WebP/JXR support
+# Link Windows WIC libraries for WebP/JXR support and DirectXTex dependencies
 if(WIN32)
     target_link_libraries(FlagManagerTool PRIVATE windowscodecs ole32)
+    target_compile_definitions(FlagManagerTool PRIVATE WIN32_LEAN_AND_MEAN NOMINMAX)
 endif()
 
 set_target_properties(FlagManagerTool PROPERTIES 
