@@ -24,5 +24,10 @@
     "SizeSmall": "小",
     "ErrorDuplicateName": "旗幟名稱已存在",
     "ErrorInvalidCrop": "裁切範圍無效",
-    "RemoveFromList": "從列表移除"
+    "RemoveFromList": "從列表移除",
+    "FillName": "填充檔案名",
+    "ConfirmOverwriteTitle": "確認覆蓋",
+    "ConfirmOverwrite": "以下檔案已存在，是否覆蓋？\n\n%1",
+    "SelectAll": "全部選擇",
+    "DeselectAll": "取消選擇"
 }

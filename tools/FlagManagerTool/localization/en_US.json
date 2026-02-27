@@ -24,5 +24,10 @@
     "SizeSmall": "Small",
     "ErrorDuplicateName": "Flag name already exists",
     "ErrorInvalidCrop": "Invalid crop range",
-    "RemoveFromList": "Remove from List"
+    "RemoveFromList": "Remove from List",
+    "FillName": "Fill Name from File",
+    "ConfirmOverwriteTitle": "Confirm Overwrite",
+    "ConfirmOverwrite": "The following files already exist. Do you want to overwrite them?\n\n%1",
+    "SelectAll": "Select All",
+    "DeselectAll": "Deselect All"
 }

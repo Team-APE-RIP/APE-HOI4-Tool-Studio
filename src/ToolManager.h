@@ -5,6 +5,7 @@
 #include <QList>
 #include <QMap>
 #include <QPluginLoader>
+#include <functional>
 #include "ToolInterface.h"
 
 class ToolProxyInterface;
@@ -35,6 +36,13 @@ public:
 signals:
     void toolsLoaded();
     void toolProcessCrashed(const QString& toolId, const QString& error);
+    void questionDialogRequested(const QString& title, const QString& message, 
+                                  std::function<void(bool)> callback);
+
+public:
+    // Request main window to show a question dialog (for tools to use)
+    void requestQuestionDialog(const QString& title, const QString& message, 
+                               std::function<void(bool)> callback);
 
 private:
     ToolManager();

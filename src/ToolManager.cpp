@@ -241,3 +241,8 @@ void ToolManager::unloadTools() {
     
     Logger::instance().logInfo("ToolManager", "All tools unloaded");
 }
+
+void ToolManager::requestQuestionDialog(const QString& title, const QString& message, 
+                                         std::function<void(bool)> callback) {
+    emit questionDialogRequested(title, message, callback);
+}

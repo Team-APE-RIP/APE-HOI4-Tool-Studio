@@ -80,6 +80,7 @@ public:
     void updateTexts();
     void applyTheme();
     static QImage loadImageFile(const QString& path);
+    bool hasSelection() const;
 
 public slots:
     void onExportCurrent();
@@ -87,6 +88,12 @@ public slots:
     void onImportClicked();
     void onContextMenuRequested(const QPoint& pos);
     void removeSelectedFile();
+    void fillNameFromFileName();
+    void selectAll();
+    void deselectAll();
+
+signals:
+    void selectionChanged(bool hasSelection);
 
 protected:
     void dragEnterEvent(QDragEnterEvent* event) override;
@@ -176,10 +183,13 @@ public:
 private slots:
     void onModeChanged(int index);
     void onSizeChanged(int id);
+    void onSelectAllClicked();
+    void onSelectionChanged(bool hasSelection);
 
 private:
     void updateButtonStyles(int activeIndex);
     void updateToolbarVisibility(int modeIndex);
+    void updateSelectAllButton(bool hasSelection);
     
     FlagManagerTool* m_tool;
     QStackedWidget* m_stack;
@@ -199,6 +209,8 @@ private:
     QPushButton* m_importBtn;
     QPushButton* m_exportBtn;
     QPushButton* m_exportAllBtn;
+    QPushButton* m_selectAllBtn;
+    bool m_hasSelection = false;
 };
 
 // --- Sidebar ---

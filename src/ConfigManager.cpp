@@ -17,6 +17,12 @@ ConfigManager::ConfigManager() {
     m_sidebarCompactMode = false;
     m_maxLogFiles = 10; // Default to 10
     loadConfig();
+    
+    // Ensure config file exists on first run (create with defaults)
+    QFile configFile(getGlobalConfigPath());
+    if (!configFile.exists()) {
+        saveConfig();
+    }
 }
 
 QString ConfigManager::getGlobalConfigPath() const {
@@ -140,6 +146,11 @@ void ConfigManager::setModPath(const QString& path) {
 void ConfigManager::clearModPath() {
     m_modPath = "";
     saveModConfig();
+}
+
+void ConfigManager::clearGamePath() {
+    m_gamePath = "";
+    saveConfig();
 }
 
 bool ConfigManager::isFirstRun() const {

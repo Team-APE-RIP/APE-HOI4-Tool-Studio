@@ -1,6 +1,8 @@
 #include "ConfigPage.h"
 #include "ConfigManager.h"
 #include "LocalizationManager.h"
+#include "PathValidator.h"
+#include "CustomMessageBox.h"
 #include "Logger.h"
 #include <QVBoxLayout>
 #include <QHBoxLayout>
@@ -157,6 +159,10 @@ void ConfigPage::updateTexts() {
     
     QPushButton *closeModBtn = findChild<QPushButton*>("CloseModBtn");
     if(closeModBtn) closeModBtn->setText(loc.getString("ConfigPage", "CloseModBtn"));
+    
+    // Refresh path values from ConfigManager (real-time read)
+    if(m_gamePathValue) m_gamePathValue->setText(ConfigManager::instance().getGamePath());
+    if(m_modPathValue) m_modPathValue->setText(ConfigManager::instance().getModPath());
 }
 
 void ConfigPage::updateTheme() {
@@ -164,8 +170,21 @@ void ConfigPage::updateTheme() {
 }
 
 void ConfigPage::browseGamePath() {
-    QString dir = QFileDialog::getExistingDirectory(this, "Select Game Directory", ConfigManager::instance().getGamePath());
+    LocalizationManager& loc = LocalizationManager::instance();
+    QString dir = QFileDialog::getExistingDirectory(this, 
+        loc.getString("SetupDialog", "SelectGameDir"), 
+        ConfigManager::instance().getGamePath());
     if (!dir.isEmpty()) {
+        // Validate game path before saving
+        QString gameError = PathValidator::instance().validateGamePath(dir);
+        if (!gameError.isEmpty()) {
+            CustomMessageBox::information(this, 
+                loc.getString("Error", "GamePathInvalid"), 
+                loc.getString("Error", gameError));
+            Logger::instance().logError("ConfigPage", "Game path validation failed: " + gameError);
+            return;
+        }
+        
         ConfigManager::instance().setGamePath(dir);
         m_gamePathValue->setText(dir);
         emit gamePathChanged();

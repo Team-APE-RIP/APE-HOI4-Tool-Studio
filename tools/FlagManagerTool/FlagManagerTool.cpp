@@ -25,7 +25,9 @@
 #include "../../src/FileManager.h"
 #include "../../src/ConfigManager.h"
 #include "../../src/Logger.h"
+#include "../../src/ToolManager.h"
 #include <QMenu>
+#include <QEventLoop>
 
 #ifdef Q_OS_WIN
 #include <windows.h>
@@ -349,6 +351,7 @@ void FlagConverterWidget::setSidebarList(QTreeWidget* list) {
     m_fileList->setColumnCount(2);
     m_fileList->setHeaderHidden(false);
     m_fileList->setContextMenuPolicy(Qt::CustomContextMenu);
+    m_fileList->setSelectionMode(QAbstractItemView::ExtendedSelection);
     
     m_fileList->clear();
     for (auto it = m_items.begin(); it != m_items.end(); ++it) {
@@ -365,6 +368,7 @@ void FlagConverterWidget::setSidebarList(QTreeWidget* list) {
 
 void FlagConverterWidget::onFileSelected() {
     QList<QTreeWidgetItem*> sel = m_fileList->selectedItems();
+    emit selectionChanged(!sel.isEmpty());
     if (sel.isEmpty()) return;
     QString path = sel[0]->data(0, Qt::UserRole).toString();
     if (m_items.contains(path)) {
@@ -594,6 +598,9 @@ void FlagConverterWidget::onContextMenuRequested(const QPoint& pos) {
         "QMenu::separator { height: 1px; background: #ccc; margin: 4px 0; }";
     menu.setStyleSheet(menuStyle);
     
+    QAction* fillAction = menu.addAction(m_tool->getString("FillName"));
+    connect(fillAction, &QAction::triggered, this, &FlagConverterWidget::fillNameFromFileName);
+    
     QAction* removeAction = menu.addAction(m_tool->getString("RemoveFromList"));
     connect(removeAction, &QAction::triggered, this, &FlagConverterWidget::removeSelectedFile);
     menu.exec(m_fileList->viewport()->mapToGlobal(pos));
@@ -616,6 +623,56 @@ void FlagConverterWidget::removeSelectedFile() {
             m_cropBottom->clear();
         }
         delete item;
+    }
+}
+
+bool FlagConverterWidget::hasSelection() const {
+    return m_fileList && !m_fileList->selectedItems().isEmpty();
+}
+
+void FlagConverterWidget::selectAll() {
+    if (!m_fileList) return;
+    m_fileList->selectAll();
+}
+
+void FlagConverterWidget::deselectAll() {
+    if (!m_fileList) return;
+    m_fileList->clearSelection();
+}
+
+void FlagConverterWidget::fillNameFromFileName() {
+    QList<QTreeWidgetItem*> sel = m_fileList->selectedItems();
+    if (sel.isEmpty()) return;
+    
+    // 收集已使用的名字
+    QSet<QString> usedNames;
+    for (auto it = m_items.begin(); it != m_items.end(); ++it) {
+        if (!it.value().name.isEmpty()) {
+            usedNames.insert(it.value().name);
+        }
+    }
+    
+    for (QTreeWidgetItem* item : sel) {
+        QString path = item->data(0, Qt::UserRole).toString();
+        if (!m_items.contains(path)) continue;
+        
+        // 从文件名提取名字（不含扩展名）
+        QString fileName = QFileInfo(path).baseName();
+        
+        // 如果名字已被使用，跳过
+        if (usedNames.contains(fileName)) continue;
+        
+        // 设置名字
+        m_items[path].name = fileName;
+        usedNames.insert(fileName);
+        item->setText(0, fileName);
+        
+        // 如果是当前选中的项目，更新编辑框
+        if (path == m_currentPath) {
+            m_nameEdit->blockSignals(true);
+            m_nameEdit->setText(fileName);
+            m_nameEdit->blockSignals(false);
+        }
     }
 }
 
@@ -846,9 +903,42 @@ static bool saveTga32(const QImage& img, const QString& path) {
 
 bool FlagConverterWidget::exportItem(const FlagItem& item, const QString& baseDir) {
     if (item.name.isEmpty() || baseDir.isEmpty()) return false;
-    QImage cropped = item.image.copy(item.crop);
+    
+    // 检查是否有文件会被覆盖
     struct Size { int w; int h; QString suffix; };
     Size sizes[] = {{82, 52, ""}, {41, 26, "medium/"}, {10, 7, "small/"}};
+    
+    QStringList existingFiles;
+    for (const auto& s : sizes) {
+        QString filePath = baseDir + "/gfx/flags/" + s.suffix + item.name + ".tga";
+        if (QFile::exists(filePath)) {
+            existingFiles.append(s.suffix + item.name + ".tga");
+        }
+    }
+    
+    // 如果有文件会被覆盖，询问用户
+    if (!existingFiles.isEmpty()) {
+        QString fileList = existingFiles.join("\n");
+        QString message = m_tool->getString("ConfirmOverwrite").arg(fileList);
+        
+        bool userConfirmed = false;
+        QEventLoop loop;
+        ToolManager::instance().requestQuestionDialog(
+            m_tool->getString("ConfirmOverwriteTitle"),
+            message,
+            [&](bool result) {
+                userConfirmed = result;
+                loop.quit();
+            }
+        );
+        loop.exec();
+        
+        if (!userConfirmed) {
+            return false;
+        }
+    }
+    
+    QImage cropped = item.image.copy(item.crop);
     for (const auto& s : sizes) {
         QImage resized = cropped.scaled(s.w, s.h, Qt::IgnoreAspectRatio, Qt::SmoothTransformation);
         QString dir = baseDir + "/gfx/flags/" + s.suffix;
@@ -1259,13 +1349,16 @@ FlagManagerMainWidget::FlagManagerMainWidget(FlagManagerTool* tool, QWidget* par
     m_importBtn = new QPushButton("Import");
     m_exportBtn = new QPushButton("Export");
     m_exportAllBtn = new QPushButton("Export All");
+    m_selectAllBtn = new QPushButton("Select All");
     m_importBtn->setFixedSize(80, 28);
     m_exportBtn->setFixedSize(80, 28);
     m_exportAllBtn->setFixedSize(80, 28);
+    m_selectAllBtn->setFixedSize(80, 28);
     
     actionLayout->addWidget(m_importBtn);
     actionLayout->addWidget(m_exportBtn);
     actionLayout->addWidget(m_exportAllBtn);
+    actionLayout->addWidget(m_selectAllBtn);
     tabLayout->addWidget(m_actionContainer);
     m_actionContainer->hide();
     
@@ -1282,6 +1375,10 @@ FlagManagerMainWidget::FlagManagerMainWidget(FlagManagerTool* tool, QWidget* par
     connect(m_importBtn, &QPushButton::clicked, m_converter, &FlagConverterWidget::onImportClicked);
     connect(m_exportBtn, &QPushButton::clicked, m_converter, &FlagConverterWidget::onExportCurrent);
     connect(m_exportAllBtn, &QPushButton::clicked, m_converter, &FlagConverterWidget::onExportAll);
+    
+    // 连接全选按钮和选择状态变化信号
+    connect(m_selectAllBtn, &QPushButton::clicked, this, &FlagManagerMainWidget::onSelectAllClicked);
+    connect(m_converter, &FlagConverterWidget::selectionChanged, this, &FlagManagerMainWidget::onSelectionChanged);
     
     m_stack->setCurrentIndex(0);
     m_browserBtn->setChecked(true);
@@ -1313,6 +1410,7 @@ void FlagManagerMainWidget::applyTheme() {
     m_importBtn->setStyleSheet(inactiveStyle);
     m_exportBtn->setStyleSheet(inactiveStyle);
     m_exportAllBtn->setStyleSheet(inactiveStyle);
+    m_selectAllBtn->setStyleSheet(inactiveStyle);
     
     m_browser->applyTheme();
     m_converter->applyTheme();
@@ -1339,6 +1437,7 @@ void FlagManagerMainWidget::updateTexts() {
     m_importBtn->setText(m_tool->getString("ImportFiles"));
     m_exportBtn->setText(m_tool->getString("Export"));
     m_exportAllBtn->setText(m_tool->getString("ExportAll"));
+    updateSelectAllButton(m_hasSelection);
     m_browser->updateTexts();
     m_converter->updateTexts();
 }
@@ -1354,6 +1453,27 @@ void FlagManagerMainWidget::onModeChanged(int index) {
 
 void FlagManagerMainWidget::onSizeChanged(int id) {
     m_browser->setSizeIndex(id);
+}
+
+void FlagManagerMainWidget::onSelectAllClicked() {
+    if (m_hasSelection) {
+        m_converter->deselectAll();
+    } else {
+        m_converter->selectAll();
+    }
+}
+
+void FlagManagerMainWidget::onSelectionChanged(bool hasSelection) {
+    m_hasSelection = hasSelection;
+    updateSelectAllButton(hasSelection);
+}
+
+void FlagManagerMainWidget::updateSelectAllButton(bool hasSelection) {
+    if (hasSelection) {
+        m_selectAllBtn->setText(m_tool->getString("DeselectAll"));
+    } else {
+        m_selectAllBtn->setText(m_tool->getString("SelectAll"));
+    }
 }
 
 // --- FlagListWidget ---

@@ -43,6 +43,7 @@ private slots:
     void onSidebarCompactChanged(bool enabled);
     void updateMemoryUsage();
     void onModClosed();
+    void onGamePathChanged();
     void onPathInvalid(const QString& titleKey, const QString& msgKey); // Updated signature
     void onToolProcessCrashed(const QString& toolId, const QString& error);
 

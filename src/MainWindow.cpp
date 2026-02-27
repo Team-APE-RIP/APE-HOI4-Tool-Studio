@@ -81,6 +81,13 @@ MainWindow::MainWindow(QWidget *parent)
     // Connect tool crash signal
     connect(&ToolManager::instance(), &ToolManager::toolProcessCrashed, 
             this, &MainWindow::onToolProcessCrashed);
+    // Connect question dialog request signal (for tools to show CustomMessageBox)
+    connect(&ToolManager::instance(), &ToolManager::questionDialogRequested,
+            this, [this](const QString& title, const QString& message, 
+                         std::function<void(bool)> callback) {
+        auto result = CustomMessageBox::question(this, title, message);
+        callback(result == QMessageBox::Yes);
+    });
     // Force refresh tools page to ensure UI is updated after loading
     m_toolsPage->refreshTools();
     
@@ -163,6 +170,7 @@ void MainWindow::setupUi() {
     m_configPage = new ConfigPage();
     connect(m_configPage, &ConfigPage::closeClicked, this, &MainWindow::closeOverlay);
     connect(m_configPage, &ConfigPage::modClosed, this, &MainWindow::onModClosed);
+    connect(m_configPage, &ConfigPage::gamePathChanged, this, &MainWindow::onGamePathChanged);
     m_mainStack->addWidget(m_configPage);
 
     m_toolsPage = new ToolsPage();
@@ -667,11 +675,52 @@ void MainWindow::onSidebarCompactChanged(bool enabled) {
 }
 
 void MainWindow::onModClosed() {
-    LocalizationManager& loc = LocalizationManager::instance();
-    CustomMessageBox::information(this, 
-        loc.getString("MainWindow", "ModClosedTitle"), 
-        loc.getString("MainWindow", "ModClosedMsg"));
-    close();
+    Logger::instance().logInfo("MainWindow", "Mod closed, showing setup dialog");
+    
+    // Stop any active tools
+    if (ToolManager::instance().isToolActive()) {
+        QList<ToolInterface*> tools = ToolManager::instance().getTools();
+        for (ToolInterface* t : tools) {
+            ToolProxyInterface* proxy = dynamic_cast<ToolProxyInterface*>(t);
+            if (proxy && proxy->isProcessRunning()) {
+                proxy->forceKillProcess();
+            }
+        }
+        ToolManager::instance().setToolActive(false);
+    }
+    
+    // Stop path monitoring
+    PathValidator::instance().stopMonitoring();
+    
+    // Hide main window and show setup dialog
+    hide();
+    
+    SetupDialog setup;
+    if (setup.exec() == QDialog::Accepted) {
+        ConfigManager& config = ConfigManager::instance();
+        config.setGamePath(setup.getGamePath());
+        config.setModPath(setup.getModPath());
+        config.setLanguage(setup.getLanguage());
+        
+        // Update UI
+        m_configPage->updateTexts();
+        
+        // Restart path monitoring
+        PathValidator::instance().startMonitoring();
+        
+        // Restart file scanning for new mod
+        m_loadingOverlay->showOverlay();
+        m_scanCheckTimer->start();
+        FileManager::instance().startScanning();
+        
+        // Show main window again
+        show();
+        Logger::instance().logInfo("MainWindow", "Setup completed, showing main window");
+    } else {
+        // User cancelled setup, close the application
+        Logger::instance().logInfo("MainWindow", "Setup cancelled, closing application");
+        close();
+    }
 }
 
 void MainWindow::onPathInvalid(const QString& titleKey, const QString& msgKey) {
@@ -680,10 +729,19 @@ void MainWindow::onPathInvalid(const QString& titleKey, const QString& msgKey) {
         loc.getString("Error", titleKey), 
         loc.getString("Error", msgKey));
     
+    // Clear only the invalid path config based on which path is invalid
+    ConfigManager& config = ConfigManager::instance();
+    if (titleKey == "GamePathInvalid") {
+        config.clearGamePath();
+        Logger::instance().logInfo("MainWindow", "Game path cleared due to validation failure");
+    } else if (titleKey == "ModPathInvalid") {
+        config.clearModPath();
+        Logger::instance().logInfo("MainWindow", "Mod path cleared due to validation failure");
+    }
+    
     // Show setup dialog if paths become invalid
     SetupDialog setup(this);
     if (setup.exec() == QDialog::Accepted) {
-        ConfigManager& config = ConfigManager::instance();
         config.setGamePath(setup.getGamePath());
         config.setModPath(setup.getModPath());
         config.setLanguage(setup.getLanguage());
@@ -795,6 +853,15 @@ void MainWindow::closeEvent(QCloseEvent *event) {
     // Stop all tool processes before closing
     ToolManager::instance().unloadTools();
     event->accept();
+}
+
+void MainWindow::onGamePathChanged() {
+    Logger::instance().logInfo("MainWindow", "Game path changed, reloading files");
+    
+    // Show loading overlay and restart file scanning
+    m_loadingOverlay->showOverlay();
+    m_scanCheckTimer->start();
+    FileManager::instance().startScanning();
 }
 
 void MainWindow::onToolProcessCrashed(const QString& toolId, const QString& error) {

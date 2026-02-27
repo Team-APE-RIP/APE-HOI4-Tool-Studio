@@ -45,6 +45,7 @@ public:
     QString getModPath() const;
     void setModPath(const QString& path);
     void clearModPath();
+    void clearGamePath();
 
     bool isFirstRun() const;
     bool hasModSelected() const;
