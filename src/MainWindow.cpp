@@ -216,7 +216,7 @@ void MainWindow::setupSidebar() {
     QPushButton *maxBtnH = createControlBtn("#28C940", "#24B538");
     connect(closeBtnH, &QPushButton::clicked, this, &MainWindow::closeWindow);
     connect(minBtnH, &QPushButton::clicked, this, &MainWindow::minimizeWindow);
-    connect(maxBtnH, &QPushButton::clicked, this, &MainWindow::maximizeWindow);
+    // connect(maxBtnH, &QPushButton::clicked, this, &MainWindow::maximizeWindow); // Disabled
     hLayout->addWidget(closeBtnH);
     hLayout->addWidget(minBtnH);
     hLayout->addWidget(maxBtnH);
@@ -233,7 +233,7 @@ void MainWindow::setupSidebar() {
     QPushButton *maxBtnV = createControlBtn("#28C940", "#24B538");
     connect(closeBtnV, &QPushButton::clicked, this, &MainWindow::closeWindow);
     connect(minBtnV, &QPushButton::clicked, this, &MainWindow::minimizeWindow);
-    connect(maxBtnV, &QPushButton::clicked, this, &MainWindow::maximizeWindow);
+    // connect(maxBtnV, &QPushButton::clicked, this, &MainWindow::maximizeWindow); // Disabled
     vLayout->addWidget(closeBtnV);
     vLayout->addWidget(minBtnV);
     vLayout->addWidget(maxBtnV);

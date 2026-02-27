@@ -12,6 +12,7 @@ CustomMessageBox::CustomMessageBox(QWidget *parent, const QString &title, const 
 {
     setWindowFlags(Qt::FramelessWindowHint | Qt::Dialog);
     setAttribute(Qt::WA_TranslucentBackground);
+    setWindowModality(Qt::WindowModal);
     setupUi(title, message, type);
     
     // Theme will be handled in paintEvent and setStyleSheet for children
@@ -98,11 +99,29 @@ void CustomMessageBox::setupUi(const QString &title, const QString &message, Typ
 
 void CustomMessageBox::information(QWidget *parent, const QString &title, const QString &message) {
     CustomMessageBox box(parent, title, message, Information);
+    box.adjustSize();
+    // Center on parent or screen
+    if (parent) {
+        QPoint parentCenter = parent->mapToGlobal(parent->rect().center());
+        box.move(parentCenter.x() - box.width() / 2, parentCenter.y() - box.height() / 2);
+    }
+    // Ensure dialog is on top
+    box.raise();
+    box.activateWindow();
     box.exec();
 }
 
 QMessageBox::StandardButton CustomMessageBox::question(QWidget *parent, const QString &title, const QString &message) {
     CustomMessageBox box(parent, title, message, Question);
+    box.adjustSize();
+    // Center on parent or screen
+    if (parent) {
+        QPoint parentCenter = parent->mapToGlobal(parent->rect().center());
+        box.move(parentCenter.x() - box.width() / 2, parentCenter.y() - box.height() / 2);
+    }
+    // Ensure dialog is on top
+    box.raise();
+    box.activateWindow();
     box.exec();
     return box.m_result;
 }

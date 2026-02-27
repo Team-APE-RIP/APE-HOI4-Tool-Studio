@@ -48,6 +48,8 @@ set(CORE_SOURCES
     src/ToolProxyInterface.h
     src/ToolManager.cpp
     src/ToolManager.h
+    src/CustomMessageBox.cpp
+    src/CustomMessageBox.h
 )
 
 # Create Core Library

@@ -26,8 +26,8 @@
 #include "../../src/ConfigManager.h"
 #include "../../src/Logger.h"
 #include "../../src/ToolManager.h"
+#include "../../src/CustomMessageBox.h"
 #include <QMenu>
-#include <QEventLoop>
 
 #ifdef Q_OS_WIN
 #include <windows.h>
@@ -921,19 +921,13 @@ bool FlagConverterWidget::exportItem(const FlagItem& item, const QString& baseDi
         QString fileList = existingFiles.join("\n");
         QString message = m_tool->getString("ConfirmOverwrite").arg(fileList);
         
-        bool userConfirmed = false;
-        QEventLoop loop;
-        ToolManager::instance().requestQuestionDialog(
+        QMessageBox::StandardButton result = CustomMessageBox::question(
+            const_cast<FlagConverterWidget*>(this),
             m_tool->getString("ConfirmOverwriteTitle"),
-            message,
-            [&](bool result) {
-                userConfirmed = result;
-                loop.quit();
-            }
+            message
         );
-        loop.exec();
         
-        if (!userConfirmed) {
+        if (result != QMessageBox::Yes) {
             return false;
         }
     }
