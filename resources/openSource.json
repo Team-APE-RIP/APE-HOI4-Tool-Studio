@@ -1,0 +1,17 @@
+[
+  {
+    "name": "Qt Framework",
+    "license": "LGPLv3",
+    "url": "https://www.qt.io/"
+  },
+  {
+    "name": "DirectXTex",
+    "license": "MIT",
+    "url": "https://github.com/microsoft/DirectXTex"
+  },
+  {
+    "name": "DirectXMath",
+    "license": "MIT",
+    "url": "https://github.com/microsoft/DirectXMath"
+  }
+]

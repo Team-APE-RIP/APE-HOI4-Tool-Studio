@@ -259,6 +259,7 @@ void FlagConverterWidget::applyTheme() {
         QWidget#ControlPanel {
             background-color: %1;
             border-top: 1px solid %2;
+            border-bottom-right-radius: 10px;
         }
         QLabel {
             color: %3;
@@ -1048,6 +1049,7 @@ void FlagBrowserWidget::applyTheme() {
     bool isDark = ConfigManager::instance().getTheme() == ConfigManager::Theme::Dark;
     QString textColor = isDark ? "#CCCCCC" : "#666666";
     m_placeholder->setStyleSheet(QString("color: %1; font-size: 18px;").arg(textColor));
+    m_scrollArea->setStyleSheet("QScrollArea { background: transparent; border: none; border-bottom-right-radius: 10px; } QScrollArea > QWidget > QWidget { background: transparent; }");
 }
 
 void FlagBrowserWidget::updateTexts() {
@@ -1370,6 +1372,9 @@ void FlagBrowserWidget::updateFlagDisplay() {
 
 FlagManagerMainWidget::FlagManagerMainWidget(FlagManagerTool* tool, QWidget* parent)
     : QWidget(parent), m_tool(tool) {
+    setObjectName("FlagManagerMainWidget");
+    setAttribute(Qt::WA_StyledBackground, true);
+    
     QVBoxLayout* layout = new QVBoxLayout(this);
     layout->setContentsMargins(0, 0, 0, 0);
     layout->setSpacing(0);
@@ -1464,8 +1469,12 @@ void FlagManagerMainWidget::applyTheme() {
     QString tabBarBg = isDark ? "#252526" : "#F0F0F0";
     QString borderColor = isDark ? "#3F3F46" : "#E0E0E0";
     QString textColor = isDark ? "#AAAAAA" : "#666666";
+    QString mainBg = isDark ? "#1E1E1E" : "#FFFFFF";
     
-    m_tabBar->setStyleSheet(QString("QWidget#FlagTabBar { background: %1; border-bottom: 1px solid %2; padding-bottom: 0px; margin-bottom: 0px; }").arg(tabBarBg, borderColor));
+    // Main widget with rounded corners
+    setStyleSheet(QString("QWidget#FlagManagerMainWidget { background-color: %1; border-top-right-radius: 10px; border-bottom-right-radius: 10px; }").arg(mainBg));
+    
+    m_tabBar->setStyleSheet(QString("QWidget#FlagTabBar { background: %1; border-bottom: 1px solid %2; padding-bottom: 0px; margin-bottom: 0px; border-top-right-radius: 10px; }").arg(tabBarBg, borderColor));
     
     // 设置容器透明背景
     m_sizeContainer->setStyleSheet("background: transparent;");
@@ -1574,7 +1583,7 @@ void FlagListWidget::applyTheme() {
     m_header->setStyleSheet(QString("font-weight: bold; padding: 10px; color: %1;").arg(headerColor));
     m_list->setStyleSheet(QString(R"(
         QTreeWidget {
-            background-color: %1; border: none; color: %2;
+            background-color: %1; border: none; color: %2; border-bottom-right-radius: 10px;
         }
         QTreeWidget::item {
             padding: 5px;

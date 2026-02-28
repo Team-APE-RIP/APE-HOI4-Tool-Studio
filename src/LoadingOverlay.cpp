@@ -44,9 +44,17 @@ LoadingOverlay::LoadingOverlay(QWidget *parent)
     m_progressBar->setRange(0, 0); // Indeterminate by default
     layout->addWidget(m_progressBar);
     
-    // Apply theme-aware styling
-    ConfigManager::Theme theme = ConfigManager::instance().getTheme();
-    bool isDark = (theme == ConfigManager::Theme::Dark);
+    updateTheme();
+    
+    hide();
+    
+    if (parent) {
+        parent->installEventFilter(this);
+    }
+}
+
+void LoadingOverlay::updateTheme() {
+    bool isDark = ConfigManager::instance().isCurrentThemeDark();
     
     QString containerBg = isDark ? "#2C2C2E" : "#FFFFFF";
     QString textColor = isDark ? "#FFFFFF" : "#1D1D1F";
@@ -81,12 +89,6 @@ LoadingOverlay::LoadingOverlay(QWidget *parent)
         "  border-radius: 3px;"
         "}"
     ).arg(progressBg, progressChunk));
-    
-    hide();
-    
-    if (parent) {
-        parent->installEventFilter(this);
-    }
 }
 
 void LoadingOverlay::setMessage(const QString& message) {
@@ -103,6 +105,7 @@ void LoadingOverlay::setProgress(int value) {
 }
 
 void LoadingOverlay::showOverlay() {
+    updateTheme();
     if (parentWidget()) {
         raise();
         updatePosition();
@@ -122,28 +125,12 @@ void LoadingOverlay::paintEvent(QPaintEvent *event) {
     QPainter painter(this);
     painter.setRenderHint(QPainter::Antialiasing);
     
-    // Semi-transparent background with rounded corners only on the left side
-    // Left side matches sidebar's rounded corners, right side is straight
+    // Semi-transparent background with rounded corners on all sides to match main window
     QPainterPath path;
     QRectF r = rect();
     qreal radius = 10;
     
-    // Draw a shape with rounded corners only on the left side
-    // Top-left corner (rounded)
-    path.moveTo(r.left() + radius, r.top());
-    // Top edge to top-right corner (straight)
-    path.lineTo(r.right(), r.top());
-    // Right edge (straight)
-    path.lineTo(r.right(), r.bottom());
-    // Bottom edge to bottom-left corner
-    path.lineTo(r.left() + radius, r.bottom());
-    // Bottom-left corner (rounded)
-    path.arcTo(r.left(), r.bottom() - 2 * radius, 2 * radius, 2 * radius, 270, -90);
-    // Left edge
-    path.lineTo(r.left(), r.top() + radius);
-    // Top-left corner (rounded)
-    path.arcTo(r.left(), r.top(), 2 * radius, 2 * radius, 180, -90);
-    path.closeSubpath();
+    path.addRoundedRect(r, radius, radius);
     
     painter.fillPath(path, QColor(0, 0, 0, 120));
 }

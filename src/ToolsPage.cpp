@@ -501,8 +501,7 @@ void ToolsPage::updateTexts() {
 }
 
 void ToolsPage::updateTheme() {
-    ConfigManager::Theme theme = ConfigManager::instance().getTheme();
-    bool isDark = (theme == ConfigManager::Theme::Dark);
+    bool isDark = ConfigManager::instance().isCurrentThemeDark();
     
     QString cardBg = isDark ? "#3A3A3C" : "#EEEEEE";
     QString cardBorder = isDark ? "#2C2C2E" : "#F5F5F7";
@@ -519,10 +518,15 @@ void ToolsPage::updateTheme() {
             border-radius: 10px;
             text-align: center;
             padding: 0px;
+            outline: none;
         }
         QPushButton#ToolCard:hover {
             background-color: %3;
-            border: 1px solid #007AFF;
+            border: 1px solid %2;
+        }
+        QPushButton#ToolCard:focus {
+            border: 1px solid %2;
+            outline: none;
         }
     )").arg(cardBg, cardBorder, cardHover);
 

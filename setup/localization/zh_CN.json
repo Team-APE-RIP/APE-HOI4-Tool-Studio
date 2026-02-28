@@ -1,0 +1,16 @@
+{
+    "window_title": "APE HOI4 Tool Studio - 安装",
+    "title": "安装 APE HOI4 Tool Studio",
+    "path_label": "安装路径:",
+    "browse_btn": "浏览...",
+    "lang_label": "语言:",
+    "install_btn": "安装",
+    "cancel_btn": "取消",
+    "select_dir_title": "选择安装目录",
+    "error_title": "错误",
+    "error_empty_path": "安装路径不能为空。",
+    "error_create_dir": "无法创建安装目录。",
+    "error_extract": "解压文件失败。安装中止。",
+    "success_title": "成功",
+    "success_msg": "安装成功完成！"
+}

@@ -8,6 +8,27 @@
 #include <QDesktopServices>
 #include <QUrl>
 #include <QGroupBox>
+#include <QFile>
+#include <QTextStream>
+#include <QJsonDocument>
+#include <QJsonArray>
+#include <QJsonObject>
+
+static QPixmap loadSvgIcon(const QString &path, bool isDark) {
+    QFile file(path);
+    if (!file.open(QIODevice::ReadOnly | QIODevice::Text))
+        return QPixmap();
+
+    QString svgContent = QTextStream(&file).readAll();
+    file.close();
+
+    QString color = isDark ? "#E0E0E0" : "#333333";
+    svgContent.replace("currentColor", color);
+
+    QPixmap pixmap;
+    pixmap.loadFromData(svgContent.toUtf8(), "SVG");
+    return pixmap;
+}
 
 SettingsPage::SettingsPage(QWidget *parent) : QWidget(parent) {
     setupUi();
@@ -63,7 +84,7 @@ void SettingsPage::setupUi() {
         ConfigManager::instance().setTheme(static_cast<ConfigManager::Theme>(index));
         emit themeChanged();
     });
-    interfaceLayout->addWidget(createSettingRow("Theme", "🎨", "Theme Mode", "Select application appearance", m_themeCombo));
+    interfaceLayout->addWidget(createSettingRow("Theme", ":/icons/palette.svg", "Theme Mode", "Select application appearance", m_themeCombo));
 
     m_languageCombo = new QComboBox();
     m_languageCombo->addItems({"English", "简体中文", "繁體中文"});
@@ -74,7 +95,7 @@ void SettingsPage::setupUi() {
             emit languageChanged();
         }
     });
-    interfaceLayout->addWidget(createSettingRow("Lang", "🌐", "Language", "Restart required to apply changes", m_languageCombo));
+    interfaceLayout->addWidget(createSettingRow("Lang", ":/icons/globe.svg", "Language", "Restart required to apply changes", m_languageCombo));
 
     m_sidebarCompactCheck = new QCheckBox();
     m_sidebarCompactCheck->setChecked(ConfigManager::instance().getSidebarCompactMode());
@@ -82,7 +103,7 @@ void SettingsPage::setupUi() {
         ConfigManager::instance().setSidebarCompactMode(checked);
         emit sidebarCompactChanged(checked);
     });
-    interfaceLayout->addWidget(createSettingRow("Sidebar", "◀", "Compact Sidebar", "Auto-collapse sidebar", m_sidebarCompactCheck));
+    interfaceLayout->addWidget(createSettingRow("Sidebar", ":/icons/sidebar.svg", "Compact Sidebar", "Auto-collapse sidebar", m_sidebarCompactCheck));
 
     contentLayout->addWidget(createGroup("Interface", interfaceLayout));
 
@@ -96,7 +117,7 @@ void SettingsPage::setupUi() {
         ConfigManager::instance().setDebugMode(checked);
         emit debugModeChanged(checked);
     });
-    debugLayout->addWidget(createSettingRow("Debug", "🐞", "Show Usage Overlay", "Show memory usage overlay", m_debugCheck));
+    debugLayout->addWidget(createSettingRow("Debug", ":/icons/bug.svg", "Show Usage Overlay", "Show memory usage overlay", m_debugCheck));
 
     m_maxLogFilesSpin = new QSpinBox();
     m_maxLogFilesSpin->setRange(1, 100);
@@ -104,13 +125,13 @@ void SettingsPage::setupUi() {
     connect(m_maxLogFilesSpin, QOverload<int>::of(&QSpinBox::valueChanged), [](int value){
         ConfigManager::instance().setMaxLogFiles(value);
     });
-    debugLayout->addWidget(createSettingRow("MaxLogs", "🧹", "Max Log Files", "Number of log files to keep", m_maxLogFilesSpin));
+    debugLayout->addWidget(createSettingRow("MaxLogs", ":/icons/broom.svg", "Max Log Files", "Number of log files to keep", m_maxLogFilesSpin));
 
     m_openLogBtn = new QPushButton("Open Logs");
     m_openLogBtn->setObjectName("OpenLogBtn");
     m_openLogBtn->setCursor(Qt::PointingHandCursor);
     connect(m_openLogBtn, &QPushButton::clicked, this, &SettingsPage::openLogDir);
-    debugLayout->addWidget(createSettingRow("Log", "📂", "Log Directory", "Open application logs", m_openLogBtn));
+    debugLayout->addWidget(createSettingRow("Log", ":/icons/folder.svg", "Log Directory", "Open application logs", m_openLogBtn));
 
     contentLayout->addWidget(createGroup("Debug", debugLayout));
 
@@ -155,11 +176,81 @@ void SettingsPage::setupUi() {
 
     m_openSourceArea = new QWidget();
     m_openSourceArea->setVisible(false);
-    QVBoxLayout *osLayout = new QVBoxLayout(m_openSourceArea);
-    osLayout->setContentsMargins(10, 0, 0, 0);
-    QLabel *osList = new QLabel("• Qt Framework (LGPLv3)\n• ... (Other libs)");
-    osList->setStyleSheet("color: #888;");
-    osLayout->addWidget(osList);
+    QGridLayout *osLayout = new QGridLayout(m_openSourceArea);
+    osLayout->setContentsMargins(10, 10, 10, 10);
+    osLayout->setSpacing(10);
+    
+    QFile osFile(":/openSource.json");
+    if (osFile.open(QIODevice::ReadOnly | QIODevice::Text)) {
+        QByteArray data = osFile.readAll();
+        QJsonDocument doc = QJsonDocument::fromJson(data);
+        if (doc.isArray()) {
+            QJsonArray arr = doc.array();
+            int row = 0;
+            int col = 0;
+            for (int i = 0; i < arr.size(); ++i) {
+                QJsonValue val = arr.at(i);
+                if (val.isObject()) {
+                    QJsonObject obj = val.toObject();
+                    QString name = obj["name"].toString();
+                    QString license = obj["license"].toString();
+                    QString url = obj["url"].toString();
+                    
+                    QPushButton *cardBtn = new QPushButton();
+                    cardBtn->setCursor(Qt::PointingHandCursor);
+                    cardBtn->setFixedSize(120, 60);
+                    
+                    // Use HTML to format the text
+                    QString btnText = QString("<div style='text-align:center;'><b>%1</b><br><span style='font-size:10px; color:#888;'>%2</span></div>").arg(name, license);
+                    
+                    // We need a QLabel inside the button to render HTML properly, or just use plain text if HTML is not supported well in QPushButton.
+                    // Actually, QPushButton supports basic HTML via its text property in some styles, but a better way is to use a layout inside the button or just plain text with newlines.
+                    // Let's use a layout inside the button for better control.
+                    QVBoxLayout *cardLayout = new QVBoxLayout(cardBtn);
+                    cardLayout->setContentsMargins(5, 5, 5, 5);
+                    cardLayout->setSpacing(2);
+                    
+                    QLabel *nameLbl = new QLabel(name);
+                    nameLbl->setAlignment(Qt::AlignCenter);
+                    nameLbl->setStyleSheet("font-weight: bold; font-size: 12px; border: none; background: transparent;");
+                    
+                    QLabel *licLbl = new QLabel(license);
+                    licLbl->setAlignment(Qt::AlignCenter);
+                    licLbl->setStyleSheet("color: #888; font-size: 10px; border: none; background: transparent;");
+                    
+                    cardLayout->addWidget(nameLbl);
+                    cardLayout->addWidget(licLbl);
+                    
+                    cardBtn->setStyleSheet(
+                        "QPushButton {"
+                        "   background-color: rgba(128, 128, 128, 0.1);"
+                        "   border: 1px solid rgba(128, 128, 128, 0.2);"
+                        "   border-radius: 8px;"
+                        "}"
+                        "QPushButton:hover {"
+                        "   background-color: rgba(128, 128, 128, 0.2);"
+                        "   border: 1px solid rgba(128, 128, 128, 0.4);"
+                        "}"
+                    );
+                    
+                    if (!url.isEmpty()) {
+                        connect(cardBtn, &QPushButton::clicked, [this, url]() {
+                            openUrl(url);
+                        });
+                    }
+                    
+                    osLayout->addWidget(cardBtn, row, col);
+                    
+                    col++;
+                    if (col >= 7) {
+                        col = 0;
+                        row++;
+                    }
+                }
+            }
+        }
+        osFile.close();
+    }
 
     aboutRowLayout->addLayout(infoLayout);
     aboutRowLayout->addWidget(copyright);
@@ -203,12 +294,17 @@ QWidget* SettingsPage::createSettingRow(const QString &id, const QString &icon, 
     row->setObjectName("SettingRow");
     row->setFixedHeight(60);
     QHBoxLayout *layout = new QHBoxLayout(row);
-    layout->setContentsMargins(20, 10, 20, 10);
+    layout->setContentsMargins(15, 10, 20, 10);
+    layout->setSpacing(15);
     
-    QLabel *iconLbl = new QLabel(icon);
+    QLabel *iconLbl = new QLabel();
     iconLbl->setObjectName("SettingIcon");
-    iconLbl->setFixedSize(30, 30);
+    iconLbl->setFixedSize(34, 34);
     iconLbl->setAlignment(Qt::AlignCenter);
+    iconLbl->setProperty("svgIcon", icon); // Store path for theme updates
+    
+    bool isDark = ConfigManager::instance().isCurrentThemeDark();
+    iconLbl->setPixmap(loadSvgIcon(icon, isDark));
     
     QVBoxLayout *textLayout = new QVBoxLayout();
     textLayout->setSpacing(2);
@@ -292,7 +388,15 @@ void SettingsPage::updateTexts() {
 }
 
 void SettingsPage::updateTheme() {
-    // Handled by MainWindow QSS
+    bool isDark = ConfigManager::instance().isCurrentThemeDark();
+                  
+    QList<QLabel*> iconLabels = findChildren<QLabel*>("SettingIcon");
+    for (QLabel* lbl : iconLabels) {
+        QString iconPath = lbl->property("svgIcon").toString();
+        if (!iconPath.isEmpty()) {
+            lbl->setPixmap(loadSvgIcon(iconPath, isDark));
+        }
+    }
 }
 
 void SettingsPage::openUrl(const QString &url) {

@@ -64,8 +64,8 @@ void FileTreeWidget::updateTheme() {
     QString hoverBg = isDark ? "#48484A" : "#E5E5EA";
     QString pathColor = isDark ? "#AAAAAA" : "#888888";
 
-    // Set widget background using specific selector
-    setStyleSheet(QString("QWidget#FileTreeWidget { background-color: %1; }").arg(bg));
+    // Set widget background using specific selector with rounded corners
+    setStyleSheet(QString("QWidget#FileTreeWidget { background-color: %1; border-top-right-radius: 10px; border-bottom-right-radius: 10px; }").arg(bg));
 
     // Search Box
     m_searchBox->setStyleSheet(QString(R"(
@@ -87,6 +87,7 @@ void FileTreeWidget::updateTheme() {
         QTreeWidget {
             border: 1px solid %1;
             border-radius: 8px;
+            border-bottom-right-radius: 10px;
             background-color: %2;
             color: %3;
             alternate-background-color: %4;

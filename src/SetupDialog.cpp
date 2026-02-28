@@ -14,13 +14,8 @@
 #include <QLineEdit>
 
 SetupDialog::SetupDialog(QWidget *parent) : QDialog(parent), m_isDarkMode(false), m_dragging(false) {
-    // Use saved theme from ConfigManager, fallback to system detection if System theme
-    ConfigManager::Theme theme = ConfigManager::instance().getTheme();
-    if (theme == ConfigManager::Theme::System) {
-        m_isDarkMode = detectSystemDarkMode();
-    } else {
-        m_isDarkMode = (theme == ConfigManager::Theme::Dark);
-    }
+    // Use saved theme from ConfigManager
+    m_isDarkMode = ConfigManager::instance().isCurrentThemeDark();
     
     // Remove system title bar, make frameless window
     setWindowFlags(Qt::FramelessWindowHint | Qt::WindowSystemMenuHint);
@@ -63,6 +58,7 @@ bool SetupDialog::detectSystemDarkMode() {
 
 void SetupDialog::applyTheme() {
     QString bg, text, border, inputBg, btnBg, btnHoverBg, browseBtnBg, browseBtnHoverBg, browseBtnText;
+    QString itemHover, comboIndicator;
     
     if (m_isDarkMode) {
         bg = "#2C2C2E";
@@ -74,6 +70,8 @@ void SetupDialog::applyTheme() {
         browseBtnBg = "#3A3A3C";
         browseBtnHoverBg = "#4A4A4C";
         browseBtnText = "#0A84FF";
+        itemHover = "#3A3A3C";
+        comboIndicator = "#FFFFFF";
     } else {
         bg = "#F5F5F7";
         text = "#1D1D1F";
@@ -84,9 +82,11 @@ void SetupDialog::applyTheme() {
         browseBtnBg = "#E5E5EA";
         browseBtnHoverBg = "#D1D1D6";
         browseBtnText = "#007AFF";
+        itemHover = "rgba(0, 0, 0, 0.05)";
+        comboIndicator = "#1D1D1F";
     }
     
-    m_centralWidget->setStyleSheet(QString(R"(
+    QString styleSheet = QString(R"(
         QWidget#CentralWidget {
             background-color: %1;
             border: 1px solid %3;
@@ -160,8 +160,23 @@ void SetupDialog::applyTheme() {
             border-radius: 6px;
             selection-background-color: #007AFF;
             selection-color: white;
+            padding: 4px;
+            outline: none;
         }
-    )").arg(bg, text, border, inputBg, btnBg, btnHoverBg, browseBtnBg, browseBtnHoverBg, browseBtnText));
+        QComboBox QAbstractItemView::item {
+            padding: 6px 12px;
+            border-left: 3px solid transparent;
+            color: %2;
+        }
+        QComboBox QAbstractItemView::item:hover {
+            background-color: %10;
+            border-left: 3px solid %11;
+            color: %2;
+        }
+    )").arg(bg, text, border, inputBg, btnBg, btnHoverBg, browseBtnBg, browseBtnHoverBg, browseBtnText);
+    
+    styleSheet = styleSheet.replace("%10", itemHover).replace("%11", comboIndicator);
+    m_centralWidget->setStyleSheet(styleSheet);
 }
 
 void SetupDialog::setupUi() {

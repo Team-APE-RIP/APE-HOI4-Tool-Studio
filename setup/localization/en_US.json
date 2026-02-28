@@ -1,0 +1,16 @@
+{
+    "window_title": "APE HOI4 Tool Studio - Setup",
+    "title": "Install APE HOI4 Tool Studio",
+    "path_label": "Installation Path:",
+    "browse_btn": "Browse...",
+    "lang_label": "Language:",
+    "install_btn": "Install",
+    "cancel_btn": "Cancel",
+    "select_dir_title": "Select Installation Directory",
+    "error_title": "Error",
+    "error_empty_path": "Installation path cannot be empty.",
+    "error_create_dir": "Failed to create installation directory.",
+    "error_extract": "Failed to extract files. Installation aborted.",
+    "success_title": "Success",
+    "success_msg": "Installation completed successfully!"
+}

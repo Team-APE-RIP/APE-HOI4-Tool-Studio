@@ -1,0 +1,11 @@
+<!DOCTYPE RCC><RCC version="1.0">
+<qresource>
+    <file alias="app.ico">../resources/app.ico</file>
+    <file>data/payload.7z</file>
+    <file>data/7z.exe</file>
+    <file>data/7z.dll</file>
+    <file>localization/en_US.json</file>
+    <file>localization/zh_CN.json</file>
+    <file>localization/zh_TW.json</file>
+</qresource>
+</RCC>

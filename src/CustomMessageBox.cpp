@@ -16,8 +16,7 @@ CustomMessageBox::CustomMessageBox(QWidget *parent, const QString &title, const 
     setupUi(title, message, type);
     
     // Theme will be handled in paintEvent and setStyleSheet for children
-    ConfigManager::Theme theme = ConfigManager::instance().getTheme();
-    bool isDark = (theme == ConfigManager::Theme::Dark);
+    bool isDark = ConfigManager::instance().isCurrentThemeDark();
     QString text = isDark ? "#FFFFFF" : "#1D1D1F";
     
     setStyleSheet(QString(R"(
@@ -38,8 +37,7 @@ void CustomMessageBox::paintEvent(QPaintEvent *event) {
     QPainter painter(this);
     painter.setRenderHint(QPainter::Antialiasing);
 
-    ConfigManager::Theme theme = ConfigManager::instance().getTheme();
-    bool isDark = (theme == ConfigManager::Theme::Dark);
+    bool isDark = ConfigManager::instance().isCurrentThemeDark();
     QColor bg = isDark ? QColor("#2C2C2E") : QColor("#FFFFFF");
     QColor border = isDark ? QColor("#3A3A3C") : QColor("#D2D2D7");
 

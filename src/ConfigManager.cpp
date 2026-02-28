@@ -4,6 +4,8 @@
 #include <QFile>
 #include <QJsonDocument>
 #include <QDebug>
+#include <QApplication>
+#include <QStyleHints>
 
 ConfigManager& ConfigManager::instance() {
     static ConfigManager instance;
@@ -21,6 +23,20 @@ ConfigManager::ConfigManager() {
     // Ensure config file exists on first run (create with defaults)
     QFile configFile(getGlobalConfigPath());
     if (!configFile.exists()) {
+        // Check for setup language cache
+        QString tempLangPath = QStandardPaths::writableLocation(QStandardPaths::TempLocation) + "/APE-HOI4-Tool-Studio/setup_cache/temp_lang.json";
+        QFile tempLangFile(tempLangPath);
+        if (tempLangFile.exists() && tempLangFile.open(QIODevice::ReadOnly)) {
+            QByteArray data = tempLangFile.readAll();
+            QJsonDocument doc = QJsonDocument::fromJson(data);
+            QJsonObject obj = doc.object();
+            if (obj.contains("language")) {
+                m_language = obj["language"].toString();
+            }
+            tempLangFile.close();
+            tempLangFile.remove(); // Clean up
+        }
+        
         saveConfig();
     }
 }
@@ -161,6 +177,22 @@ bool ConfigManager::hasModSelected() const {
     return !m_modPath.isEmpty();
 }
 
+bool ConfigManager::isSystemDarkTheme() const {
+    if (qApp) {
+        return qApp->styleHints()->colorScheme() == Qt::ColorScheme::Dark;
+    }
+    return false;
+}
+
+bool ConfigManager::isCurrentThemeDark() const {
+    if (m_theme == Theme::Dark) {
+        return true;
+    } else if (m_theme == Theme::System) {
+        return isSystemDarkTheme();
+    }
+    return false;
+}
+
 QJsonObject ConfigManager::toJson() const {
     QJsonObject obj;
     obj["gamePath"] = m_gamePath;
@@ -179,4 +211,23 @@ void ConfigManager::setFromJson(const QJsonObject& obj) {
     if (obj.contains("debugMode")) m_debugMode = obj["debugMode"].toBool();
     
     Logger::instance().logInfo("ConfigManager", "Loaded config from IPC data");
+}
+
+QString ConfigManager::getComboBoxItemStyle(bool isDark) {
+    QString text = isDark ? "#FFFFFF" : "#1D1D1F";
+    QString itemHover = isDark ? "#3A3A3C" : "rgba(0, 0, 0, 0.05)";
+    QString comboIndicator = isDark ? "#FFFFFF" : "#1D1D1F";
+    
+    return QString(R"(
+        QComboBox QAbstractItemView::item {
+            padding: 6px 12px;
+            border-left: 3px solid transparent;
+            color: %1;
+        }
+        QComboBox QAbstractItemView::item:hover {
+            background-color: %2;
+            border-left: 3px solid %3;
+            color: %1;
+        }
+    )").arg(text, itemHover, comboIndicator);
 }

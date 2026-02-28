@@ -22,5 +22,14 @@
         <file>localization/zh_TW/Common.json</file>
         <file>localization/zh_TW/Error.json</file>
         <file>localization/zh_TW/ToolsPage.json</file>
+        <file>icons/palette.svg</file>
+        <file>icons/globe.svg</file>
+        <file>icons/sidebar.svg</file>
+        <file>icons/bug.svg</file>
+        <file>icons/broom.svg</file>
+        <file>icons/folder.svg</file>
+        <file>icons/folder-game.svg</file>
+        <file>icons/package.svg</file>
+        <file>openSource.json</file>
     </qresource>
 </RCC>

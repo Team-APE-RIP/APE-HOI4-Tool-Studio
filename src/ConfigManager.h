@@ -50,6 +50,12 @@ public:
     bool isFirstRun() const;
     bool hasModSelected() const;
     
+    bool isSystemDarkTheme() const;
+    bool isCurrentThemeDark() const;
+    
+    // Style helpers for tools
+    static QString getComboBoxItemStyle(bool isDark);
+
     // Serialization for IPC
     QJsonObject toJson() const;
     void setFromJson(const QJsonObject& obj); // For ToolHost to initialize from IPC data

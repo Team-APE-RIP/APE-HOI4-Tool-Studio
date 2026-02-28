@@ -1,6 +1,6 @@
 cmake_minimum_required(VERSION 3.16)
 
-project(APEHOI4ToolStudio VERSION 1.0.3 LANGUAGES CXX)
+project(APEHOI4ToolStudio VERSION 1.1.0 LANGUAGES CXX)
 
 set(CMAKE_CXX_STANDARD 17)
 set(CMAKE_CXX_STANDARD_REQUIRED ON)
@@ -24,6 +24,20 @@ set(TS_FILES
 
 set(QRC_FILES
     resources/resources.qrc
+)
+
+# DirectXTex library sources for DDS support (shared by all tools)
+set(DIRECTXTEX_SOURCES
+    libs/DirectXTex/DirectXTexImage.cpp
+    libs/DirectXTex/DirectXTexDDS.cpp
+    libs/DirectXTex/DirectXTexUtil.cpp
+    libs/DirectXTex/DirectXTexConvert.cpp
+    libs/DirectXTex/DirectXTexCompress.cpp
+    libs/DirectXTex/DirectXTexMisc.cpp
+    libs/DirectXTex/DirectXTexMipmaps.cpp
+    libs/DirectXTex/BC.cpp
+    libs/DirectXTex/BC4BC5.cpp
+    libs/DirectXTex/BC6HBC7.cpp
 )
 
 # Core Library Sources (Shared between App and Tools)
@@ -50,12 +64,48 @@ set(CORE_SOURCES
     src/ToolManager.h
     src/CustomMessageBox.cpp
     src/CustomMessageBox.h
+    ${DIRECTXTEX_SOURCES}
 )
 
 # Create Core Library
 add_library(APEHOI4Core SHARED ${CORE_SOURCES})
 target_link_libraries(APEHOI4Core PRIVATE Qt6::Core Qt6::Gui Qt6::Widgets Qt6::Network)
 target_compile_definitions(APEHOI4Core PUBLIC APP_VERSION="${PROJECT_VERSION}")
+
+# Add DirectXTex and DirectXMath include paths for Core library
+target_include_directories(APEHOI4Core PUBLIC 
+    ${CMAKE_CURRENT_SOURCE_DIR}/libs/DirectXTex
+    ${CMAKE_CURRENT_SOURCE_DIR}/libs/DirectXMath
+)
+
+# Suppress DirectXTex warnings for GCC/MinGW
+if(CMAKE_CXX_COMPILER_ID STREQUAL "GNU" OR CMAKE_CXX_COMPILER_ID STREQUAL "Clang")
+    target_compile_options(APEHOI4Core PRIVATE -Wno-ignored-attributes)
+endif()
+
+# Link Windows WIC libraries for DirectXTex dependencies
+if(WIN32)
+    target_link_libraries(APEHOI4Core PRIVATE windowscodecs ole32)
+    target_compile_definitions(APEHOI4Core PRIVATE WIN32_LEAN_AND_MEAN NOMINMAX)
+endif()
+
+# --- Setup Application ---
+set(SETUP_SOURCES
+    setup/main.cpp
+    setup/Setup.cpp
+    setup/Setup.h
+    setup/setup_resources.qrc
+)
+
+if(WIN32)
+    list(APPEND SETUP_SOURCES resources/windows_icon.rc)
+endif()
+
+add_executable(SetupApp WIN32 ${SETUP_SOURCES})
+target_link_libraries(SetupApp PRIVATE Qt6::Core Qt6::Gui Qt6::Widgets)
+set_target_properties(SetupApp PROPERTIES 
+    RUNTIME_OUTPUT_DIRECTORY "${CMAKE_BINARY_DIR}/setup"
+)
 
 # Main Application Sources (includes ToolHostMode for subprocess support)
 set(APP_SOURCES
@@ -89,6 +139,9 @@ endif()
 
 add_executable(APEHOI4ToolStudio ${APP_SOURCES})
 target_link_libraries(APEHOI4ToolStudio PRIVATE Qt6::Core Qt6::Gui Qt6::Widgets Qt6::Network APEHOI4Core)
+set_target_properties(APEHOI4ToolStudio PROPERTIES 
+    RUNTIME_OUTPUT_DIRECTORY "${CMAKE_BINARY_DIR}/main"
+)
 
 # --- FileManager Tool (Example Plugin) ---
 set(FILEMANAGER_TOOL_SOURCES
@@ -103,8 +156,8 @@ target_link_libraries(FileManagerTool PRIVATE Qt6::Core Qt6::Gui Qt6::Widgets AP
 
 # Output directory for tools
 set_target_properties(FileManagerTool PROPERTIES 
-    LIBRARY_OUTPUT_DIRECTORY "${CMAKE_BINARY_DIR}/tools/FileManagerTool"
-    RUNTIME_OUTPUT_DIRECTORY "${CMAKE_BINARY_DIR}/tools/FileManagerTool"
+    LIBRARY_OUTPUT_DIRECTORY "${CMAKE_BINARY_DIR}/main/tools/FileManagerTool"
+    RUNTIME_OUTPUT_DIRECTORY "${CMAKE_BINARY_DIR}/main/tools/FileManagerTool"
 )
 
 # Copy metadata.json to output directory
@@ -134,44 +187,14 @@ set(FLAGMANAGER_TOOL_SOURCES
     tools/FlagManagerTool/FlagManagerTool.h
 )
 
-# DirectXTex library sources for DDS support
-set(DIRECTXTEX_SOURCES
-    libs/DirectXTex/DirectXTexImage.cpp
-    libs/DirectXTex/DirectXTexDDS.cpp
-    libs/DirectXTex/DirectXTexUtil.cpp
-    libs/DirectXTex/DirectXTexConvert.cpp
-    libs/DirectXTex/DirectXTexCompress.cpp
-    libs/DirectXTex/DirectXTexMisc.cpp
-    libs/DirectXTex/DirectXTexMipmaps.cpp
-    libs/DirectXTex/BC.cpp
-    libs/DirectXTex/BC4BC5.cpp
-    libs/DirectXTex/BC6HBC7.cpp
-)
+add_library(FlagManagerTool SHARED ${FLAGMANAGER_TOOL_SOURCES})
 
-add_library(FlagManagerTool SHARED ${FLAGMANAGER_TOOL_SOURCES} ${DIRECTXTEX_SOURCES})
-
-# Suppress DirectXTex warnings for GCC/MinGW (affects all files including DirectXTex.h)
-if(CMAKE_CXX_COMPILER_ID STREQUAL "GNU" OR CMAKE_CXX_COMPILER_ID STREQUAL "Clang")
-    target_compile_options(FlagManagerTool PRIVATE -Wno-ignored-attributes)
-endif()
-
-# Add DirectXTex and DirectXMath include paths
-target_include_directories(FlagManagerTool PRIVATE 
-    ${CMAKE_CURRENT_SOURCE_DIR}/libs/DirectXTex
-    ${CMAKE_CURRENT_SOURCE_DIR}/libs/DirectXMath
-)
-
+# DirectXTex is now provided by APEHOI4Core, just link to it
 target_link_libraries(FlagManagerTool PRIVATE Qt6::Core Qt6::Gui Qt6::Widgets APEHOI4Core)
 
-# Link Windows WIC libraries for WebP/JXR support and DirectXTex dependencies
-if(WIN32)
-    target_link_libraries(FlagManagerTool PRIVATE windowscodecs ole32)
-    target_compile_definitions(FlagManagerTool PRIVATE WIN32_LEAN_AND_MEAN NOMINMAX)
-endif()
-
 set_target_properties(FlagManagerTool PROPERTIES 
-    LIBRARY_OUTPUT_DIRECTORY "${CMAKE_BINARY_DIR}/tools/FlagManagerTool"
-    RUNTIME_OUTPUT_DIRECTORY "${CMAKE_BINARY_DIR}/tools/FlagManagerTool"
+    LIBRARY_OUTPUT_DIRECTORY "${CMAKE_BINARY_DIR}/main/tools/FlagManagerTool"
+    RUNTIME_OUTPUT_DIRECTORY "${CMAKE_BINARY_DIR}/main/tools/FlagManagerTool"
 )
 
 add_custom_command(TARGET FlagManagerTool POST_BUILD

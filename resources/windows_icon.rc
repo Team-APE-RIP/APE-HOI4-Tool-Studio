@@ -3,8 +3,8 @@
 IDI_ICON1 ICON "../resources/app.ico"
 
 VS_VERSION_INFO VERSIONINFO
-FILEVERSION 1,0,3,2
-PRODUCTVERSION 1,0,3,2
+FILEVERSION 1,1,0,0
+PRODUCTVERSION 1,1,0,0
 FILEFLAGSMASK 0x3fL
 FILEFLAGS 0x0L
 FILEOS VOS_NT_WINDOWS32
@@ -16,12 +16,12 @@ BEGIN
         BLOCK "000004b0"
         BEGIN
             VALUE "FileDescription", "APE HOI4 Tool Studio"
-            VALUE "FileVersion", "1.0.3.2"
+            VALUE "FileVersion", "1.1.0.0"
             VALUE "InternalName", "APEHOI4ToolStudio"
             VALUE "LegalCopyright", "Copyright © 2026 Team APE:RIP"
             VALUE "OriginalFilename", "APEHOI4ToolStudio.exe"
             VALUE "ProductName", "APE HOI4 Tool Studio"
-            VALUE "ProductVersion", "1.0.3.2"
+            VALUE "ProductVersion", "1.1.0.0"
         END
     END
     BLOCK "VarFileInfo"

@@ -16,6 +16,7 @@ public:
     void setProgress(int value); // 0-100, -1 for indeterminate
     void showOverlay();
     void hideOverlay();
+    void updateTheme();
 
 protected:
     void paintEvent(QPaintEvent *event) override;

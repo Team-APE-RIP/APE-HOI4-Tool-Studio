@@ -9,6 +9,24 @@
 #include <QScrollArea>
 #include <QFileDialog>
 #include <QGroupBox>
+#include <QFile>
+#include <QTextStream>
+
+static QPixmap loadSvgIcon(const QString &path, bool isDark) {
+    QFile file(path);
+    if (!file.open(QIODevice::ReadOnly | QIODevice::Text))
+        return QPixmap();
+
+    QString svgContent = QTextStream(&file).readAll();
+    file.close();
+
+    QString color = isDark ? "#E0E0E0" : "#333333";
+    svgContent.replace("currentColor", color);
+
+    QPixmap pixmap;
+    pixmap.loadFromData(svgContent.toUtf8(), "SVG");
+    return pixmap;
+}
 
 ConfigPage::ConfigPage(QWidget *parent) : QWidget(parent) {
     setupUi();
@@ -49,7 +67,7 @@ void ConfigPage::setupUi() {
     scroll->setFrameShape(QFrame::NoFrame);
     
     QWidget *content = new QWidget();
-    content->setObjectName("SettingsContent");
+    content->setObjectName("ConfigContent");
     QVBoxLayout *contentLayout = new QVBoxLayout(content);
     contentLayout->setContentsMargins(40, 20, 40, 40);
     contentLayout->setSpacing(30);
@@ -64,7 +82,7 @@ void ConfigPage::setupUi() {
     connect(reselectGameBtn, &QPushButton::clicked, this, &ConfigPage::browseGamePath);
     m_gamePathValue = new QLabel(ConfigManager::instance().getGamePath());
     m_gamePathValue->setStyleSheet("color: #888; font-size: 12px; margin-right: 10px;");
-    dirLayout->addWidget(createSettingRow("GameDir", "📁", "Game Directory", "Path to HOI4", m_gamePathValue, reselectGameBtn));
+    dirLayout->addWidget(createSettingRow("GameDir", ":/icons/folder-game.svg", "Game Directory", "Path to HOI4", m_gamePathValue, reselectGameBtn));
 
     QPushButton *closeModBtn = new QPushButton("Close Current Mod");
     closeModBtn->setObjectName("CloseModBtn");
@@ -73,7 +91,7 @@ void ConfigPage::setupUi() {
     connect(closeModBtn, &QPushButton::clicked, this, &ConfigPage::closeCurrentMod);
     m_modPathValue = new QLabel(ConfigManager::instance().getModPath());
     m_modPathValue->setStyleSheet("color: #888; font-size: 12px; margin-right: 10px;");
-    dirLayout->addWidget(createSettingRow("ModDir", "📦", "Current Mod", ConfigManager::instance().getModPath(), m_modPathValue, closeModBtn));
+    dirLayout->addWidget(createSettingRow("ModDir", ":/icons/package.svg", "Current Mod", ConfigManager::instance().getModPath(), m_modPathValue, closeModBtn));
 
     contentLayout->addWidget(createGroup("Directories", dirLayout));
 
@@ -108,12 +126,17 @@ QWidget* ConfigPage::createSettingRow(const QString &id, const QString &icon, co
     row->setObjectName("SettingRow");
     row->setFixedHeight(60);
     QHBoxLayout *layout = new QHBoxLayout(row);
-    layout->setContentsMargins(20, 10, 20, 10);
+    layout->setContentsMargins(15, 10, 20, 10);
+    layout->setSpacing(15);
     
-    QLabel *iconLbl = new QLabel(icon);
+    QLabel *iconLbl = new QLabel();
     iconLbl->setObjectName("SettingIcon");
-    iconLbl->setFixedSize(30, 30);
+    iconLbl->setFixedSize(34, 34);
     iconLbl->setAlignment(Qt::AlignCenter);
+    iconLbl->setProperty("svgIcon", icon);
+    
+    bool isDark = ConfigManager::instance().isCurrentThemeDark();
+    iconLbl->setPixmap(loadSvgIcon(icon, isDark));
     
     QVBoxLayout *textLayout = new QVBoxLayout();
     textLayout->setSpacing(2);
@@ -166,7 +189,15 @@ void ConfigPage::updateTexts() {
 }
 
 void ConfigPage::updateTheme() {
-    // Handled by parent
+    bool isDark = ConfigManager::instance().isCurrentThemeDark();
+                  
+    QList<QLabel*> iconLabels = findChildren<QLabel*>("SettingIcon");
+    for (QLabel* lbl : iconLabels) {
+        QString iconPath = lbl->property("svgIcon").toString();
+        if (!iconPath.isEmpty()) {
+            lbl->setPixmap(loadSvgIcon(iconPath, isDark));
+        }
+    }
 }
 
 void ConfigPage::browseGamePath() {

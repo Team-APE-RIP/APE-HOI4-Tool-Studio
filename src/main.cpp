@@ -6,6 +6,10 @@
 #include <QApplication>
 #include <QLocale>
 #include <QTranslator>
+#include <QStandardPaths>
+#include <QFile>
+#include <QJsonDocument>
+#include <QJsonObject>
 
 int main(int argc, char *argv[]) {
     QApplication a(argc, argv);
@@ -13,7 +17,7 @@ int main(int argc, char *argv[]) {
     // Set application metadata
     a.setApplicationName("APE HOI4 Tool Studio");
     a.setOrganizationName("Team APE-RIP");
-    a.setApplicationVersion("1.0.0");
+    a.setApplicationVersion("1.1.0");
     
     // Check for tool host mode: --tool-host <server_name> <tool_dll_path> [tool_name] [--log-file <path>]
     QStringList args = a.arguments();
@@ -36,6 +40,22 @@ int main(int argc, char *argv[]) {
     // Normal mode: run main application
     ConfigManager& config = ConfigManager::instance();
     
+    // Check for setup cache language
+    QString tempDir = QStandardPaths::writableLocation(QStandardPaths::TempLocation) + "/APE-HOI4-Tool-Studio/setup_cache";
+    QString tempLangFile = tempDir + "/temp_lang.json";
+    QFile tFile(tempLangFile);
+    if (tFile.exists() && tFile.open(QIODevice::ReadOnly)) {
+        QJsonDocument doc = QJsonDocument::fromJson(tFile.readAll());
+        QJsonObject obj = doc.object();
+        if (obj.contains("language")) {
+            QString tempLang = obj["language"].toString();
+            if (tempLang == "English" || tempLang == "简体中文" || tempLang == "繁體中文") {
+                config.setLanguage(tempLang);
+            }
+        }
+        tFile.close();
+    }
+
     // Load language immediately
     LocalizationManager::instance().loadLanguage(config.getLanguage());
 

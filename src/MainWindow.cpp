@@ -139,6 +139,7 @@ void MainWindow::setupUi() {
     m_dashboardSplitter->setHandleWidth(1);
     
     m_dashboardContent = new QWidget();
+    m_dashboardContent->setObjectName("DashboardContent");
     QVBoxLayout *contentLayout = new QVBoxLayout(m_dashboardContent);
     contentLayout->setContentsMargins(0, 0, 0, 0);
     QLabel *dashLabel = new QLabel("Dashboard Area", m_dashboardContent);
@@ -146,6 +147,7 @@ void MainWindow::setupUi() {
     contentLayout->addWidget(dashLabel);
 
     m_rightSidebar = new QWidget();
+    m_rightSidebar->setObjectName("RightSidebar");
     m_rightSidebar->setFixedWidth(250); // Default width
     m_rightSidebar->hide(); // Hidden by default
     QVBoxLayout *rightLayout = new QVBoxLayout(m_rightSidebar);
@@ -160,6 +162,7 @@ void MainWindow::setupUi() {
     m_mainStack->addWidget(m_dashboard);
 
     m_settingsPage = new SettingsPage();
+    m_settingsPage->setObjectName("OverlayContainer");
     connect(m_settingsPage, &SettingsPage::closeClicked, this, &MainWindow::closeOverlay);
     connect(m_settingsPage, &SettingsPage::languageChanged, this, &MainWindow::onLanguageChanged);
     connect(m_settingsPage, &SettingsPage::themeChanged, this, &MainWindow::onThemeChanged);
@@ -168,12 +171,14 @@ void MainWindow::setupUi() {
     m_mainStack->addWidget(m_settingsPage);
 
     m_configPage = new ConfigPage();
+    m_configPage->setObjectName("OverlayContainer");
     connect(m_configPage, &ConfigPage::closeClicked, this, &MainWindow::closeOverlay);
     connect(m_configPage, &ConfigPage::modClosed, this, &MainWindow::onModClosed);
     connect(m_configPage, &ConfigPage::gamePathChanged, this, &MainWindow::onGamePathChanged);
     m_mainStack->addWidget(m_configPage);
 
     m_toolsPage = new ToolsPage();
+    m_toolsPage->setObjectName("OverlayContainer");
     connect(m_toolsPage, &ToolsPage::closeClicked, this, &MainWindow::closeOverlay);
     connect(m_toolsPage, &ToolsPage::toolSelected, this, &MainWindow::onToolSelected);
     m_mainStack->addWidget(m_toolsPage);
@@ -331,25 +336,26 @@ void MainWindow::updateMemoryUsage() {
 }
 
 void MainWindow::applyTheme() {
-    ConfigManager::Theme theme = ConfigManager::instance().getTheme();
-    bool isDark = (theme == ConfigManager::Theme::Dark);
+    bool isDark = ConfigManager::instance().isCurrentThemeDark();
     
     QString bg = isDark ? "#2C2C2E" : "#F5F5F7";
     QString sidebarBg = isDark ? "#2C2C2E" : "#F5F5F7";
     QString text = isDark ? "#FFFFFF" : "#1D1D1F";
     QString border = isDark ? "#3A3A3C" : "#D2D2D7";
     QString rowBg = isDark ? "#2C2C2E" : "#FFFFFF";
-    QString rowHover = isDark ? "#3A3A3C" : "#F5F5F7";
+    QString rowHover = isDark ? "#3A3A3C" : "rgba(0, 0, 0, 0.05)";
     QString iconBg = isDark ? "#3A3A3C" : "#EEEEEE";
     QString treeItemHover = isDark ? "#3A3A3C" : "#E8E8E8";
     QString treeItemSelected = isDark ? "#0A84FF" : "#007AFF";
+    QString comboIndicator = isDark ? "#FFFFFF" : "#1D1D1F";
     
     QString style = QString(R"(
         QWidget#CentralWidget { background-color: %1; border: 1px solid %4; border-radius: 10px; }
         QWidget#Sidebar { background-color: %2; border-right: 1px solid %4; border-top-left-radius: 10px; border-bottom-left-radius: 10px; }
         QWidget#OverlayContainer { background-color: %2; border-top-right-radius: 10px; border-bottom-right-radius: 10px; }
-        QWidget#SettingsContent, QWidget#ToolsContent { background-color: %2; }
-        QWidget#Dashboard { background-color: %1; }
+        QWidget#Dashboard { background-color: %1; border-top-right-radius: 10px; border-bottom-right-radius: 10px; }
+        QWidget#DashboardContent { background-color: %1; border-top-right-radius: 10px; border-bottom-right-radius: 10px; }
+        QWidget#RightSidebar { background-color: %2; border-top-right-radius: 10px; border-bottom-right-radius: 10px; }
         
         QLabel { color: %3; }
         QLabel#SidebarTitle { font-size: 16px; font-weight: 800; }
@@ -365,11 +371,44 @@ void MainWindow::applyTheme() {
         }
         
         QLabel#SettingIcon {
-            background-color: %7; border-radius: 8px; color: %3;
+            background-color: %7; border-radius: 10px; color: %3;
         }
         
         QComboBox {
-            border: 1px solid %4; border-radius: 6px; padding: 4px; background-color: %5; color: %3;
+            border: 1px solid %4; 
+            border-radius: 6px; 
+            padding: 5px 24px 5px 12px; 
+            background-color: %5; 
+            color: %3;
+        }
+        QComboBox:hover {
+            background-color: %6;
+        }
+        QComboBox::drop-down {
+            subcontrol-origin: padding;
+            subcontrol-position: top right;
+            width: 24px;
+            border-left: none;
+        }
+        QComboBox QAbstractItemView {
+            border: 1px solid %4;
+            border-radius: 6px;
+            background-color: %5;
+            color: %3;
+            selection-background-color: #007AFF;
+            selection-color: white;
+            padding: 4px;
+            outline: none;
+        }
+        QComboBox QAbstractItemView::item {
+            padding: 6px 12px;
+            border-left: 3px solid transparent;
+            color: %3;
+        }
+        QComboBox QAbstractItemView::item:hover {
+            background-color: %6;
+            border-left: 3px solid %10;
+            color: %3;
         }
 
         QPushButton#GithubLink, QPushButton#OpenSourceBtn, QPushButton#LicenseLink {
@@ -404,7 +443,10 @@ void MainWindow::applyTheme() {
         }
         
         QScrollArea {
-            background-color: %1; border: none;
+            background-color: transparent; border: none;
+        }
+        QScrollArea > QWidget > QWidget {
+            background-color: transparent;
         }
         
         QToolTip {
@@ -488,13 +530,13 @@ void MainWindow::applyTheme() {
         QScrollBar::add-page:horizontal, QScrollBar::sub-page:horizontal {
             background: transparent;
         }
-    )").arg(bg, sidebarBg, text, border, rowBg, rowHover, iconBg, treeItemHover, treeItemSelected);
+    )").arg(bg, sidebarBg, text, border, rowBg, rowHover, iconBg, treeItemHover, treeItemSelected).replace("%10", comboIndicator);
     
     setStyleSheet(style);
     
-    // Apply theme to right sidebar
-    m_rightSidebar->setStyleSheet(QString("background-color: %1; border-left: 1px solid %2;").arg(sidebarBg, border));
-    m_dashboardContent->setStyleSheet(QString("background-color: %1;").arg(bg));
+    // Apply theme to right sidebar with rounded corners
+    m_rightSidebar->setStyleSheet(QString("QWidget#RightSidebar { background-color: %1; border-left: 1px solid %2; border-top-right-radius: 10px; border-bottom-right-radius: 10px; }").arg(sidebarBg, border));
+    m_dashboardContent->setStyleSheet(QString("QWidget#DashboardContent { background-color: %1; border-top-right-radius: 10px; border-bottom-right-radius: 10px; }").arg(bg));
     
     // Apply theme to splitter handle
     m_dashboardSplitter->setStyleSheet(QString("QSplitter::handle { background-color: %1; }").arg(border));
@@ -644,6 +686,9 @@ void MainWindow::onLanguageChanged() {
 
 void MainWindow::onThemeChanged() {
     applyTheme();
+    
+    m_settingsPage->updateTheme();
+    m_configPage->updateTheme();
     
     // Update ToolsPage theme (must be after applyTheme to override global styles)
     m_toolsPage->updateTheme();
