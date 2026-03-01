@@ -57,6 +57,13 @@ int main(int argc, char *argv[]) {
     
     // Check for setup cache language
     QString tempDir = QStandardPaths::writableLocation(QStandardPaths::TempLocation) + "/APE-HOI4-Tool-Studio/setup_cache";
+    
+    // Clean up setup cache exe if exists
+    QString setupCacheExe = tempDir + "/Setup.exe";
+    if (QFile::exists(setupCacheExe)) {
+        QFile::remove(setupCacheExe);
+    }
+    
     QString tempLangFile = tempDir + "/temp_lang.json";
     QFile tFile(tempLangFile);
     if (tFile.exists() && tFile.open(QIODevice::ReadOnly)) {
