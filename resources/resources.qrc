@@ -8,6 +8,7 @@
         <file>localization/en_US/Common.json</file>
         <file>localization/en_US/Error.json</file>
         <file>localization/en_US/ToolsPage.json</file>
+        <file>localization/en_US/Update.json</file>
         <file>localization/zh_CN/MainWindow.json</file>
         <file>localization/zh_CN/SettingsPage.json</file>
         <file>localization/zh_CN/ConfigPage.json</file>
@@ -15,6 +16,7 @@
         <file>localization/zh_CN/Common.json</file>
         <file>localization/zh_CN/Error.json</file>
         <file>localization/zh_CN/ToolsPage.json</file>
+        <file>localization/zh_CN/Update.json</file>
         <file>localization/zh_TW/MainWindow.json</file>
         <file>localization/zh_TW/SettingsPage.json</file>
         <file>localization/zh_TW/ConfigPage.json</file>
@@ -22,10 +24,13 @@
         <file>localization/zh_TW/Common.json</file>
         <file>localization/zh_TW/Error.json</file>
         <file>localization/zh_TW/ToolsPage.json</file>
+        <file>localization/zh_TW/Update.json</file>
         <file>icons/palette.svg</file>
         <file>icons/globe.svg</file>
         <file>icons/sidebar.svg</file>
         <file>icons/bug.svg</file>
+        <file>icons/pin.svg</file>
+        <file>icons/trash.svg</file>
         <file>icons/broom.svg</file>
         <file>icons/folder.svg</file>
         <file>icons/folder-game.svg</file>

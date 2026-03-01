@@ -14,6 +14,7 @@
 #include "ConfigPage.h"
 #include "ToolsPage.h"
 #include "LoadingOverlay.h"
+#include "Update.h"
 
 class MainWindow : public QMainWindow {
     Q_OBJECT
@@ -97,6 +98,9 @@ private:
     // Loading Overlay
     LoadingOverlay *m_loadingOverlay;
     QTimer *m_scanCheckTimer;
+    
+    // Update Overlay
+    Update *m_updateOverlay;
     
     // Sidebar collapse delay timer
     QTimer *m_sidebarCollapseTimer;

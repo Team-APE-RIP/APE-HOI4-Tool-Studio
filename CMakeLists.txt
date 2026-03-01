@@ -1,6 +1,6 @@
 cmake_minimum_required(VERSION 3.16)
 
-project(APEHOI4ToolStudio VERSION 1.1.0 LANGUAGES CXX)
+project(APEHOI4ToolStudio VERSION 1.2.0 LANGUAGES CXX)
 
 set(CMAKE_CXX_STANDARD 17)
 set(CMAKE_CXX_STANDARD_REQUIRED ON)
@@ -126,6 +126,8 @@ set(APP_SOURCES
     src/ToolHostMode.h
     src/LoadingOverlay.cpp
     src/LoadingOverlay.h
+    src/Update.cpp
+    src/Update.h
     ${QRC_FILES}
     ${TS_FILES}
 )

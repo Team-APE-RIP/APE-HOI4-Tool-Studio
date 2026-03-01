@@ -54,4 +54,5 @@ private:
     bool m_isDarkMode;
     bool m_dragging;
     QPoint m_dragPosition;
+    bool m_isAutoSetup;
 };

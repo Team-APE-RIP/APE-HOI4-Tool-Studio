@@ -27,6 +27,8 @@ private slots:
     void openUrl(const QString &url);
     void toggleOpenSource();
     void openLogDir();
+    void createStartMenuShortcut();
+    void clearAppCache();
 
 private:
     void setupUi();
@@ -42,6 +44,8 @@ private:
     QWidget *m_openSourceArea;
     QPushButton *m_openSourceToggleBtn;
     QPushButton *m_openLogBtn;
+    QPushButton *m_pinToStartBtn;
+    QPushButton *m_clearCacheBtn;
 };
 
 #endif // SETTINGSPAGE_H

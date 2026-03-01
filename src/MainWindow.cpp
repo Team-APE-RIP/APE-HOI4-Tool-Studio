@@ -55,6 +55,14 @@ MainWindow::MainWindow(QWidget *parent)
     LocalizationManager& loc = LocalizationManager::instance();
     m_loadingOverlay->setMessage(loc.getString("MainWindow", "LoadingFiles"));
     
+    // Setup Update Overlay
+    m_updateOverlay = new Update(m_centralWidget);
+    
+    // Check for updates after a short delay
+    QTimer::singleShot(2000, this, [this]() {
+        m_updateOverlay->checkForUpdates();
+    });
+    
     // Setup scan check timer - poll every 500ms to check if scanning is complete
     m_scanCheckTimer = new QTimer(this);
     m_scanCheckTimer->setInterval(500);
@@ -689,6 +697,7 @@ void MainWindow::onThemeChanged() {
     
     m_settingsPage->updateTheme();
     m_configPage->updateTheme();
+    m_updateOverlay->updateTheme();
     
     // Update ToolsPage theme (must be after applyTheme to override global styles)
     m_toolsPage->updateTheme();

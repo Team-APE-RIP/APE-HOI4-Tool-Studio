@@ -1,6 +1,7 @@
 {
     "SettingsTitle": "設定",
     "Group_Interface": "介面",
+    "Group_Accessibility": "輔助",
     "Group_Debug": "調試",
     "Group_About": "關於",
     "Theme_Title": "主題模式",
@@ -21,5 +22,9 @@
     "OpenSourceBtn": "開源庫列表 ▼",
     "Theme_System": "跟隨系統",
     "Theme_Light": "淺色",
-    "Theme_Dark": "深色"
+    "Theme_Dark": "深色",
+    "PinToStart_Title": "固定到「開始」",
+    "PinToStart_Desc": "在開始螢幕創建捷徑",
+    "ClearCache_Title": "清理App快取",
+    "ClearCache_Desc": "清理後將自動關閉應用"
 }

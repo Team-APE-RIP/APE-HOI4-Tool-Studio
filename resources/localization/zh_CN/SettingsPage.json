@@ -1,6 +1,7 @@
 {
     "SettingsTitle": "设置",
     "Group_Interface": "界面",
+    "Group_Accessibility": "辅助",
     "Group_Debug": "调试",
     "Group_About": "关于",
     "Theme_Title": "主题模式",
@@ -21,5 +22,9 @@
     "OpenSourceBtn": "开源库列表 ▼",
     "Theme_System": "跟随系统",
     "Theme_Light": "浅色",
-    "Theme_Dark": "深色"
+    "Theme_Dark": "深色",
+    "PinToStart_Title": "固定到“开始”",
+    "PinToStart_Desc": "在开始屏幕创建快捷方式",
+    "ClearCache_Title": "清理App缓存",
+    "ClearCache_Desc": "清理后将自动关闭应用"
 }

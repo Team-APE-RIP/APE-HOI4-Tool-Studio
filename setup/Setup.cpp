@@ -109,6 +109,38 @@ private:
     bool m_isDark;
 };
 
+// Helper function to copy directory
+static bool copyDirectory(const QString &srcPath, const QString &dstPath, bool overwrite) {
+    QDir srcDir(srcPath);
+    if (!srcDir.exists()) return false;
+
+    QDir dstDir(dstPath);
+    if (!dstDir.exists()) {
+        dstDir.mkpath(".");
+    }
+
+    bool success = true;
+    QFileInfoList fileInfoList = srcDir.entryInfoList(QDir::Files | QDir::Dirs | QDir::NoDotAndDotDot);
+    for (const QFileInfo &fileInfo : fileInfoList) {
+        QString srcFilePath = fileInfo.filePath();
+        QString dstFilePath = dstDir.filePath(fileInfo.fileName());
+
+        if (fileInfo.isDir()) {
+            success = copyDirectory(srcFilePath, dstFilePath, overwrite) && success;
+        } else {
+            if (QFile::exists(dstFilePath)) {
+                if (overwrite) {
+                    QFile::remove(dstFilePath);
+                } else {
+                    continue; // Skip if it exists and we shouldn't overwrite
+                }
+            }
+            success = QFile::copy(srcFilePath, dstFilePath) && success;
+        }
+    }
+    return success;
+}
+
 // Helper function to show the custom message box
 static void showCustomMessageBox(QWidget *parent, const QString &title, const QString &message, SetupMessageBox::Type type, bool isDark) {
     SetupMessageBox box(parent, title, message, type, isDark);
@@ -123,7 +155,7 @@ static void showCustomMessageBox(QWidget *parent, const QString &title, const QS
 }
 // ------------------------------------------
 
-Setup::Setup(QWidget *parent) : QDialog(parent), currentLang("English"), m_isDarkMode(false), m_dragging(false) {
+Setup::Setup(QWidget *parent) : QDialog(parent), currentLang("English"), m_isDarkMode(false), m_dragging(false), m_isAutoSetup(false) {
     m_isDarkMode = detectSystemDarkMode();
     
     // Remove system title bar, make frameless window
@@ -429,6 +461,9 @@ void Setup::setupUi() {
     iconLayout->addStretch();
     mainLayout->addLayout(iconLayout);
 
+    // Add stretch to push the top elements up and keep them fixed
+    mainLayout->addStretch();
+
     // Installation Path
     QVBoxLayout *pathLayout = new QVBoxLayout();
     pathLayout->setSpacing(6);
@@ -439,8 +474,25 @@ void Setup::setupUi() {
     pathInputLayout->setSpacing(8);
     pathEdit = new QLineEdit(this);
     
-    // 默认安装路径改为 D:/APE HOI4 Tool Studio
-    pathEdit->setText("D:/APE HOI4 Tool Studio");
+    // 默认安装路径改为 D:/APE HOI4 Tool Studio，如果有历史路径则优先使用
+    QString defaultPath = "D:/APE HOI4 Tool Studio";
+    QString pathJsonFile = QStandardPaths::writableLocation(QStandardPaths::TempLocation) + "/APE-HOI4-Tool-Studio/path.json";
+    QFile pFile(pathJsonFile);
+    if (pFile.exists() && pFile.open(QIODevice::ReadOnly)) {
+        QJsonDocument doc = QJsonDocument::fromJson(pFile.readAll());
+        QJsonObject obj = doc.object();
+        if (obj.contains("path")) {
+            QString historyPath = obj["path"].toString();
+            if (!historyPath.isEmpty()) {
+                defaultPath = historyPath;
+            }
+        }
+        if (obj.contains("auto") && obj["auto"].toString() == "1") {
+            m_isAutoSetup = true;
+        }
+        pFile.close();
+    }
+    pathEdit->setText(defaultPath);
     
     browseBtn = new QPushButton(this);
     browseBtn->setObjectName("BrowseButton");
@@ -474,6 +526,14 @@ void Setup::setupUi() {
     btnLayout->addWidget(installBtn);
     btnLayout->addStretch();
     mainLayout->addLayout(btnLayout);
+
+    if (m_isAutoSetup) {
+        pathLabel->hide();
+        pathEdit->hide();
+        browseBtn->hide();
+        installBtn->hide();
+        QTimer::singleShot(100, this, &Setup::startInstall);
+    }
 }
 
 void Setup::loadLanguage(const QString& langCode) {
@@ -523,7 +583,10 @@ void Setup::browseDirectory() {
     if (!dir.isEmpty()) {
         QDir d(dir);
         if (d.dirName() != "APE HOI4 Tool Studio") {
-            dir += "/APE HOI4 Tool Studio";
+            // 使用 QDir::cleanPath 和 QDir::filePath 安全地拼接路径，避免双斜杠
+            dir = QDir::cleanPath(d.filePath("APE HOI4 Tool Studio"));
+        } else {
+            dir = QDir::cleanPath(dir);
         }
         pathEdit->setText(dir);
     }
@@ -537,8 +600,29 @@ void Setup::startInstall() {
         return;
     }
 
+    // Kill any running instance of APEHOI4ToolStudio.exe before installation
+    QProcess::execute("taskkill", QStringList() << "/F" << "/IM" << "APEHOI4ToolStudio.exe");
+
+    // Hide UI elements during installation
+    pathLabel->hide();
+    pathEdit->hide();
+    browseBtn->hide();
+    installBtn->hide();
+
     QDir dir(targetPath);
+    QString oldToolsPath = QStandardPaths::writableLocation(QStandardPaths::TempLocation) + "/APE-HOI4-Tool-Studio/setup_cache/old_tools";
+    
     if (dir.exists()) {
+        // Backup tools
+        QDir toolsDir(dir.filePath("tools"));
+        if (toolsDir.exists()) {
+            QDir oldToolsDir(oldToolsPath);
+            if (oldToolsDir.exists()) {
+                oldToolsDir.removeRecursively();
+            }
+            copyDirectory(toolsDir.absolutePath(), oldToolsPath, true);
+        }
+        
         // 尝试清空目录
         dir.removeRecursively();
     }
@@ -549,28 +633,74 @@ void Setup::startInstall() {
         return;
     }
 
-    installBtn->setEnabled(false);
-    browseBtn->setEnabled(false);
-    pathEdit->setEnabled(false);
     langCombo->setEnabled(false);
     
     progressBar->show();
     progressBar->setValue(10);
 
     // 提取文件
-    QTimer::singleShot(100, this, [this, targetPath]() {
+    QTimer::singleShot(100, this, [this, targetPath, oldToolsPath]() {
         if (extractPayload(targetPath)) {
+            // Restore tools
+            QDir oldToolsDir(oldToolsPath);
+            if (oldToolsDir.exists()) {
+                QDir dir(targetPath);
+                QString newToolsPath = dir.filePath("tools");
+                copyDirectory(oldToolsPath, newToolsPath, false); // Do not overwrite new tools
+                oldToolsDir.removeRecursively(); // Clean up
+            }
+            
             progressBar->setValue(100);
-            showCustomMessageBox(this, currentLoc["success_title"].toString("Success"), 
-                currentLoc["success_msg"].toString("Installation completed successfully!"), SetupMessageBox::Information, m_isDarkMode);
+            
+            QString successTitle = currentLoc["success_title"].toString("Success");
+            QString successMsg = currentLoc["success_msg"].toString("Installation completed successfully!");
+            
+            if (m_isAutoSetup) {
+                if (currentLang == "简体中文") {
+                    successTitle = "更新成功";
+                    successMsg = "更新已成功完成！";
+                } else if (currentLang == "繁體中文") {
+                    successTitle = "更新成功";
+                    successMsg = "更新已成功完成！";
+                } else {
+                    successTitle = "Update Success";
+                    successMsg = "Update completed successfully!";
+                }
+            }
+            
+            showCustomMessageBox(this, successTitle, successMsg, SetupMessageBox::Information, m_isDarkMode);
             
             // 启动程序
             QProcess::startDetached(targetPath + "/APEHOI4ToolStudio.exe", QStringList());
             accept();
         } else {
-            showCustomMessageBox(this, currentLoc["error_title"].toString("Error"), 
-                currentLoc["error_extract"].toString("Failed to extract files. Installation aborted."), SetupMessageBox::Critical, m_isDarkMode);
-            installBtn->setEnabled(true);
+            QString errorTitle = currentLoc["error_title"].toString("Error");
+            QString errorMsg = currentLoc["error_extract"].toString("Failed to extract files. Installation aborted.");
+            
+            if (m_isAutoSetup) {
+                if (currentLang == "简体中文") {
+                    errorTitle = "更新失败";
+                    errorMsg = "提取文件失败。更新已中止。";
+                } else if (currentLang == "繁體中文") {
+                    errorTitle = "更新失敗";
+                    errorMsg = "提取文件失敗。更新已中止。";
+                } else {
+                    errorTitle = "Update Error";
+                    errorMsg = "Failed to extract files. Update aborted.";
+                }
+            }
+            
+            showCustomMessageBox(this, errorTitle, errorMsg, SetupMessageBox::Critical, m_isDarkMode);
+            
+            if (!m_isAutoSetup) {
+                pathLabel->show();
+                pathEdit->show();
+                browseBtn->show();
+                installBtn->show();
+                installBtn->setEnabled(true);
+                browseBtn->setEnabled(true);
+                pathEdit->setEnabled(true);
+            }
             progressBar->hide();
         }
     });

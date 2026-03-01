@@ -13,6 +13,10 @@
 #include <QJsonDocument>
 #include <QJsonArray>
 #include <QJsonObject>
+#include <QDir>
+#include <QStandardPaths>
+#include <QCoreApplication>
+#include <QApplication>
 
 static QPixmap loadSvgIcon(const QString &path, bool isDark) {
     QFile file(path);
@@ -86,6 +90,21 @@ void SettingsPage::setupUi() {
     });
     interfaceLayout->addWidget(createSettingRow("Theme", ":/icons/palette.svg", "Theme Mode", "Select application appearance", m_themeCombo));
 
+    m_sidebarCompactCheck = new QCheckBox();
+    m_sidebarCompactCheck->setChecked(ConfigManager::instance().getSidebarCompactMode());
+    connect(m_sidebarCompactCheck, &QCheckBox::toggled, [this](bool checked){
+        ConfigManager::instance().setSidebarCompactMode(checked);
+        emit sidebarCompactChanged(checked);
+    });
+    // Restore the correct icon for the sidebar setting
+    interfaceLayout->addWidget(createSettingRow("Sidebar", ":/icons/sidebar.svg", "Compact Sidebar", "Auto-collapse sidebar", m_sidebarCompactCheck));
+
+    contentLayout->addWidget(createGroup("Interface", interfaceLayout));
+
+    // 1.5 Accessibility Group
+    QVBoxLayout *accessibilityLayout = new QVBoxLayout();
+    accessibilityLayout->setSpacing(0);
+
     m_languageCombo = new QComboBox();
     m_languageCombo->addItems({"English", "简体中文", "繁體中文"});
     m_languageCombo->setCurrentText(ConfigManager::instance().getLanguage());
@@ -95,17 +114,21 @@ void SettingsPage::setupUi() {
             emit languageChanged();
         }
     });
-    interfaceLayout->addWidget(createSettingRow("Lang", ":/icons/globe.svg", "Language", "Restart required to apply changes", m_languageCombo));
+    accessibilityLayout->addWidget(createSettingRow("Lang", ":/icons/globe.svg", "Language", "Restart required to apply changes", m_languageCombo));
 
-    m_sidebarCompactCheck = new QCheckBox();
-    m_sidebarCompactCheck->setChecked(ConfigManager::instance().getSidebarCompactMode());
-    connect(m_sidebarCompactCheck, &QCheckBox::toggled, [this](bool checked){
-        ConfigManager::instance().setSidebarCompactMode(checked);
-        emit sidebarCompactChanged(checked);
-    });
-    interfaceLayout->addWidget(createSettingRow("Sidebar", ":/icons/sidebar.svg", "Compact Sidebar", "Auto-collapse sidebar", m_sidebarCompactCheck));
+    m_pinToStartBtn = new QPushButton("Pin");
+    m_pinToStartBtn->setObjectName("PinToStartBtn");
+    m_pinToStartBtn->setCursor(Qt::PointingHandCursor);
+    connect(m_pinToStartBtn, &QPushButton::clicked, this, &SettingsPage::createStartMenuShortcut);
+    accessibilityLayout->addWidget(createSettingRow("PinToStart", ":/icons/pin.svg", "Pin to Start", "Create a shortcut in the Start menu", m_pinToStartBtn));
 
-    contentLayout->addWidget(createGroup("Interface", interfaceLayout));
+    m_clearCacheBtn = new QPushButton("Clear");
+    m_clearCacheBtn->setObjectName("ClearCacheBtn");
+    m_clearCacheBtn->setCursor(Qt::PointingHandCursor);
+    connect(m_clearCacheBtn, &QPushButton::clicked, this, &SettingsPage::clearAppCache);
+    accessibilityLayout->addWidget(createSettingRow("ClearCache", ":/icons/trash.svg", "Clear App Cache", "App will close automatically after clearing", m_clearCacheBtn));
+
+    contentLayout->addWidget(createGroup("Accessibility", accessibilityLayout));
 
     // 2. Debug Group
     QVBoxLayout *debugLayout = new QVBoxLayout();
@@ -344,6 +367,8 @@ void SettingsPage::updateTexts() {
     // Group Titles
     QLabel *interfaceGroup = findChild<QLabel*>("Interface_GroupTitle");
     if(interfaceGroup) interfaceGroup->setText(loc.getString("SettingsPage", "Group_Interface"));
+    QLabel *accessibilityGroup = findChild<QLabel*>("Accessibility_GroupTitle");
+    if(accessibilityGroup) accessibilityGroup->setText(loc.getString("SettingsPage", "Group_Accessibility"));
     QLabel *debugGroup = findChild<QLabel*>("Debug_GroupTitle");
     if(debugGroup) debugGroup->setText(loc.getString("SettingsPage", "Group_Debug"));
     QLabel *aboutGroup = findChild<QLabel*>("About_GroupTitle");
@@ -380,6 +405,18 @@ void SettingsPage::updateTexts() {
     if(sidebarTitle) sidebarTitle->setText(loc.getString("SettingsPage", "Sidebar_Title"));
     QLabel *sidebarDesc = findChild<QLabel*>("Sidebar_Desc");
     if(sidebarDesc) sidebarDesc->setText(loc.getString("SettingsPage", "Sidebar_Desc"));
+
+    QLabel *pinTitle = findChild<QLabel*>("PinToStart_Title");
+    if(pinTitle) pinTitle->setText(loc.getString("SettingsPage", "PinToStart_Title"));
+    QLabel *pinDesc = findChild<QLabel*>("PinToStart_Desc");
+    if(pinDesc) pinDesc->setText(loc.getString("SettingsPage", "PinToStart_Desc"));
+    if(m_pinToStartBtn) m_pinToStartBtn->setText(loc.getString("SettingsPage", "PinToStart_Title")); // Or a specific button text if needed
+
+    QLabel *clearTitle = findChild<QLabel*>("ClearCache_Title");
+    if(clearTitle) clearTitle->setText(loc.getString("SettingsPage", "ClearCache_Title"));
+    QLabel *clearDesc = findChild<QLabel*>("ClearCache_Desc");
+    if(clearDesc) clearDesc->setText(loc.getString("SettingsPage", "ClearCache_Desc"));
+    if(m_clearCacheBtn) m_clearCacheBtn->setText(loc.getString("SettingsPage", "ClearCache_Title")); // Or a specific button text if needed
     
     QPushButton *githubLink = findChild<QPushButton*>("GithubLink");
     if(githubLink) githubLink->setText(loc.getString("SettingsPage", "GithubLink"));
@@ -412,4 +449,38 @@ void SettingsPage::toggleOpenSource() {
 void SettingsPage::openLogDir() {
     Logger::instance().openLogDirectory();
     Logger::instance().logClick("OpenLogDir");
+}
+
+void SettingsPage::createStartMenuShortcut() {
+    // For Windows Start Menu, the typical path for current user is:
+    // %APPDATA%\Microsoft\Windows\Start Menu\Programs
+    // QStandardPaths::ApplicationsLocation usually points to this on Windows.
+    QString startMenuPath = QStandardPaths::writableLocation(QStandardPaths::ApplicationsLocation);
+    if (startMenuPath.isEmpty()) {
+        Logger::instance().logError("Settings", "Could not find Start Menu path");
+        return;
+    }
+
+    QString shortcutPath = QDir(startMenuPath).filePath("APE HOI4 Tool Studio.lnk");
+    QString targetPath = QCoreApplication::applicationFilePath();
+
+    // In Qt, QFile::link creates a shortcut on Windows
+    QFile::remove(shortcutPath); // Remove if it already exists
+    if (QFile::link(targetPath, shortcutPath)) {
+        Logger::instance().logInfo("Settings", "Successfully created Start Menu shortcut at: " + shortcutPath);
+    } else {
+        Logger::instance().logError("Settings", "Failed to create Start Menu shortcut at: " + shortcutPath);
+    }
+    Logger::instance().logClick("CreateStartMenuShortcut");
+}
+
+void SettingsPage::clearAppCache() {
+    QString tempDir = QStandardPaths::writableLocation(QStandardPaths::TempLocation) + "/APE-HOI4-Tool-Studio";
+    QDir dir(tempDir);
+    if (dir.exists()) {
+        dir.removeRecursively();
+        Logger::instance().logInfo("Settings", "Cleared app cache at: " + tempDir);
+    }
+    Logger::instance().logClick("ClearAppCache");
+    QApplication::quit();
 }

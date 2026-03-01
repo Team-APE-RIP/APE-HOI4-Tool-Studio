@@ -1,6 +1,7 @@
 {
     "SettingsTitle": "Settings",
     "Group_Interface": "Interface",
+    "Group_Accessibility": "Accessibility",
     "Group_Debug": "Debug",
     "Group_About": "About",
     "Theme_Title": "Theme Mode",
@@ -21,5 +22,9 @@
     "OpenSourceBtn": "Open Source Libraries ▼",
     "Theme_System": "System",
     "Theme_Light": "Light",
-    "Theme_Dark": "Dark"
+    "Theme_Dark": "Dark",
+    "PinToStart_Title": "Pin to Start",
+    "PinToStart_Desc": "Create a shortcut in the Start menu",
+    "ClearCache_Title": "Clear App Cache",
+    "ClearCache_Desc": "App will close automatically after clearing"
 }
