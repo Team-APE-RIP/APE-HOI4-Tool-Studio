@@ -1,5 +1,4 @@
 #include "Logger.h"
-#include "ConfigManager.h"
 #include <QStandardPaths>
 #include <QDir>
 #include <QDateTime>
@@ -124,9 +123,12 @@ void Logger::openLogDirectory() {
     QDesktopServices::openUrl(QUrl::fromLocalFile(logDir));
 }
 
+void Logger::setMaxLogFiles(int count) {
+    m_maxLogFiles = count;
+}
+
 void Logger::cleanOldLogs() {
-    int maxFiles = ConfigManager::instance().getMaxLogFiles();
-    if (maxFiles <= 0) return;
+    if (m_maxLogFiles <= 0) return;
 
     QString logDir = QStandardPaths::writableLocation(QStandardPaths::TempLocation) + "/APE-HOI4-Tool-Studio/logs";
     QDir dir(logDir);
@@ -139,8 +141,8 @@ void Logger::cleanOldLogs() {
         return a.lastModified() > b.lastModified();
     });
 
-    if (files.size() > maxFiles) {
-        for (int i = maxFiles; i < files.size(); ++i) {
+    if (files.size() > m_maxLogFiles) {
+        for (int i = m_maxLogFiles; i < files.size(); ++i) {
             QFile::remove(files[i].absoluteFilePath());
         }
     }

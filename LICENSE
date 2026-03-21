@@ -1,24 +1,36 @@
-            Team APE:RIP Source Code License Agreement
-                       APE HOI4 Tool Studio
-                    Version 2, March 13, 2026
+              Team APE:RIP Source Code License Agreement              
+                         APE HOI4 Tool Studio                         
+                      Version 3, March 21, 2026
 
  Copyright (C) 2026 Team APE:RIP. All rights reserved.
  Everyone is permitted to copy and distribute verbatim copies of this
  license agreement, but it may not be modified.
 
-  This license agreement (the "Agreement") applies to the source
-code, compiled binaries, and related documentation of APE HOI4 Tool
-Studio (collectively, the "Software"). By obtaining, using, modifying,
-or distributing the source code or binaries of the Software, you fully accept all terms of this Agreement.
+  This license agreement (the "Agreement") applies to the source code,
+compiled binaries, and related documentation of APE HOI4 Tool Studio
+(collectively, the "Software"). Unless otherwise expressly stated in
+this Agreement, the term "Software" as used herein includes the main
+program of the Software, the built-in tools (official tools) and
+built-in plugins (official plugins) distributed together with the main
+program, and their related protected core code, build artifacts, and
+documentation, but does not necessarily include code, resources, and
+documentation independently owned by third-party tools or third-party
+plugins. By obtaining, using, modifying, or distributing the source
+code or binaries of the Software, you fully accept all terms of this
+Agreement. You understand and agree that whether acceptance of this
+Agreement has been formed may be proven by repository access records,
+download records, commit records, build records, distribution records,
+display records, log records, hash values, timestamps, or other
+reasonable technical records.
 
   1.Grant and License.
-  
-  Subject to strict compliance with this Agreement, Team APE:RIP 
-grants you a free, non-exclusive, non-transferable right to:
-  
+
+  Subject to strict compliance with this Agreement, Team APE:RIP grants
+you a free, non-exclusive, non-transferable right to:
+
   a) Download, compile, run, and modify the Software's source code for
   personal learning or non-profit digital derivative work development;
-  
+
   b) Distribute unmodified copies of the Software or derivative
   versions you have modified, provided it is non-commercial.
 
@@ -27,70 +39,125 @@ grants you a free, non-exclusive, non-transferable right to:
   When exercising the above rights, you must strictly comply with the
 following restrictions. Any violation will result in immediate
 termination of your license:
-   
-  a) No Commercial Use: It is strictly prohibited to use the 
-  Software (including its source code, binaries, and modified 
-  derivative versions) for any commercial purpose. This includes but 
-  is not limited to: paid sharing, publishing, selling, renting, 
-  sublicensing, placing it behind a paywall, or providing it as part 
-  of a standalone commercial product or service;
-   
-  b) No Reverse Engineering: You may not reverse engineer, decompile, 
-  or disassemble the Software, or otherwise attempt to obtain its 
-  source code.
-   
+
+  a) No Commercial Use: It is strictly prohibited to use the Software
+  (including its source code, binaries, modified derivative versions,
+  and the built-in tools and built-in plugins contained therein) for
+  any commercial purpose. This includes but is not limited to: paid
+  sharing, publishing, selling, renting, sublicensing, placing it
+  behind a paywall, or providing it as part of a standalone commercial
+  product or service;
+
+  b) No Reverse Engineering: You may not reverse engineer, decompile,
+  or disassemble the Software, or otherwise attempt to obtain the
+  protected source code, undisclosed implementations, private
+  interfaces, protocol details, or security mechanisms of the
+  Software.
+
   3.Source Code Copying Requirements.
-  
-  If you copy parts of the Software's source code into your project 
-and distribute it, you must comply with the following:
 
-  a) Prominent Notice: You must include a prominent notice in the 
-  copied source code stating which source code was copied and the 
-  date of copying, and clearly indicate that you copied parts of this 
-  project. If the project that copied this source code has a 
-  graphical user interface, you must display that you copied parts of 
-  this project and provide a way to navigate to the relevant 
-  interface of this project;
-  
-  b) No Tampering with Copyright and Display Content: It is strictly 
-  prohibited to develop projects that remove, minimize, obscure, or 
-  modify Team APE:RIP copyright notices, team identifiers, or any 
-  notifications in the Software. It is strictly prohibited to use 
-  code modifications or third-party injections to obscure, remove, or 
-  modify any advertisements or sponsorship content displayed in the 
-  main interface or elsewhere;
-  
-  c) No Login Bypass or Server Connection Blocking: It is strictly 
-  prohibited to develop projects that remove or crack server 
-  connection features, bypass login, forge, or intercept APIs by 
-  technical means.
+  If you copy parts of the Software's source code into your project and
+distribute it, you must comply with the following:
 
-  4.Third-Party Tools and Module Development.
+  a) Prominent Notice: You must include a prominent notice in the
+  copied source code stating which source code was copied and the date
+  of copying, and clearly indicate that you copied parts of this
+  project. If the project that copied this source code has a graphical
+  user interface, you must display that you copied parts of this
+  project and provide a way to navigate to the relevant interface of
+  this project;
 
-  This software supports loading third-party tools via a modular 
-system. We encourage community developers to build third-party tools 
-for this software, but they must follow these requirements:
-   
-  a) Independent License: Third-party tools loaded as independent 
-  dynamic link libraries (DLLs) or other forms may have independent 
-  licenses, provided that the tool's codebase does not contain the 
-  protected core code of this software;
-  
-  b) Compliant Interaction: Third-party tools interacting with the 
-  main program may not include functions intended to circumvent the 
-  restrictions in Section 2. It is strictly prohibited to develop or 
-  distribute tools that can be used to hide main program 
-  advertisements or crack main program limitations;
-  
-  c) Official Inclusion: If you wish to merge your third-party tool 
-  into Team APE:RIP's official code repository, you must agree to 
-  license it to Team APE:RIP under this Agreement.
+  b) No Tampering with Copyright and Display Content: It is strictly
+  prohibited to develop projects that remove, minimize, obscure, or
+  modify Team APE:RIP copyright notices, team identifiers, or any
+  notifications in the Software. It is strictly prohibited to use code
+  modifications or third-party injections to obscure, remove, or
+  modify any advertisements or sponsorship content displayed in the
+  main interface or elsewhere; the foregoing restrictions also apply
+  to the relevant displayed content in built-in tools and built-in
+  plugins;
 
-  5.Disclaimer.
-  
-  The Software's source code is provided "as is" without any express 
-or implied warranties, including but not limited to warranties of 
-merchantability, fitness for a particular purpose, and 
-non-infringement. In no event shall Team APE:RIP or the copyright 
-holders be liable for any claim, damages, or other liability arising 
-from the use of the Software or other dealings with the Software.
+  c) No Login Bypass or Server Connection Blocking: It is strictly
+  prohibited to develop projects that remove or crack server
+  connection features, bypass login, forge, or intercept APIs by
+  technical means; it is also strictly prohibited to use modifications
+  to the Software, built-in tools, or built-in plugins to circumvent
+  the account system, online restrictions, update mechanisms,
+  permission verification, or other technical limitations.
+
+  4.Development Requirements for Third-Party Tools, Third-Party
+Plugins, and Related Extensions.
+
+  This Software supports loading third-party tools and third-party
+plugins through a modular system. We encourage community developers to
+build third-party tools and third-party plugins for this Software, but
+they must follow these requirements:
+
+  a) Independent License: Third-party tools and third-party plugins
+  loaded as independent dynamic link libraries (DLLs) or in other
+  forms may have independent licenses, provided that the codebase of
+  such third-party tool or third-party plugin does not contain
+  protected core code, undisclosed implementations, private
+  interfaces, security mechanisms, or other content protected under
+  this Agreement from the Software, built-in tools, or built-in
+  plugins;
+
+  b) Compliant Interaction: Third-party tools and third-party plugins
+  interacting with the main program of the Software may not include
+  functions intended to circumvent the restrictions in Section 2 of
+  this Agreement. It is strictly prohibited to develop or distribute
+  any third-party tools or third-party plugins that can be used to
+  hide advertisements of the main program, built-in tools, or
+  built-in plugins, crack main program limitations, bypass login,
+  forge or intercept APIs, interfere with updates, undermine access
+  control, affect security mechanisms, or obstruct the normal display
+  and operation of official content;
+
+  c) Official Inclusion: If you wish to merge your third-party tool or
+  third-party plugin into Team APE:RIP's official code repository,
+  official release versions, built-in tool system, or built-in plugin
+  system, you must agree to license it to Team APE:RIP under this
+  Agreement, or under such other official licensing arrangement as
+  Team APE:RIP may then require.
+
+  5.Breach, Termination, and Remedies.
+
+  If you violate this Agreement, applicable law, relevant
+supplementary rules, or accompanying notices, Team APE:RIP shall have
+the right to immediately terminate your authorization and take
+measures including but not limited to requiring cessation of
+infringement, deletion of related content, cessation of distribution,
+cessation of service provision, issuance of notices, preservation of
+evidence, pursuit of contractual liability, pursuit of tort liability,
+claiming damages, and taking other legal measures. You understand and
+agree that Team APE:RIP shall be entitled, in accordance with law, to
+claim against the breaching party the reasonable costs incurred for
+investigation, evidence collection, legal consultation, legal
+representation, notarization, preservation, appraisal, auditing,
+travel, litigation, arbitration, and enforcement.
+
+  6.Applicable Law, Dispute Resolution, and Disclaimer.
+
+  The Software's source code is provided "as is" without any express
+or implied warranties, including but not limited to warranties of
+merchantability, fitness for a particular purpose, and
+non-infringement. In no event shall Team APE:RIP or the copyright
+holders be liable for any claim, damages, or other liability arising
+from the use of the Software, built-in tools, built-in plugins,
+third-party tools, third-party plugins, or other dealings related to
+the Software. Unless otherwise mandatorily required by applicable law,
+any dispute arising out of or relating to this Agreement, the
+Software, its source code, build artifacts, built-in tools, built-in
+plugins, third-party tools, third-party plugins, or any matter
+related thereto shall first be resolved through friendly
+consultation; if consultation fails, Team APE:RIP shall have the
+right, according to the actual rights holder, operating entity, place
+of infringement, place of contract performance, location of servers,
+domicile of the defendant, or any other place having an actual
+connection, to bring an action before a people's court with
+jurisdiction, or submit the matter to the corresponding dispute
+resolution institution in accordance with rules separately published
+by Team APE:RIP. In the event of any ambiguity, conflict, or
+inconsistency among different language versions, and unless otherwise
+mandatorily required by law, the Simplified Chinese version shall
+prevail for interpretation.

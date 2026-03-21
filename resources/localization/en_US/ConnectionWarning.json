@@ -1,7 +1,0 @@
-{
-    "Title": "Network connection lost",
-    "Message": "Please save your progress and check your network. Normal operation will resume automatically after the connection is restored.",
-    "Countdown": "Entering reconnect-wait mode in %1 seconds.",
-    "ReconnectTitle": "Waiting for reconnection",
-    "ReconnectMessage": "Main content interaction is temporarily paused. The application is continuously trying to restore the connection and will resume automatically once it succeeds."
-}

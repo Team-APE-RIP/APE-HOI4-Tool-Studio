@@ -17,6 +17,7 @@ public:
     void logInfo(const QString& context, const QString& message);
     void openLogDirectory();
     void cleanOldLogs();
+    void setMaxLogFiles(int count);
     
     // Set log file path (for subprocess to use same log as main process)
     void setLogFilePath(const QString& path);
@@ -33,6 +34,7 @@ private:
     QString m_logFilePath;
     QMutex m_mutex;
     bool m_initialized;
+    int m_maxLogFiles = 10;
 };
 
 #endif // LOGGER_H

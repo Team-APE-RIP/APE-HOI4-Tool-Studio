@@ -18,6 +18,7 @@ public:
 
     void loadTools();
     void unloadTools();  // Stop all tool processes
+    bool unloadToolsAndWait(int timeoutMsPerTool = 3000);
     QList<ToolInterface*> getTools() const;
     ToolInterface* getTool(const QString& id) const;
     

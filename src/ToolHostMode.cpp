@@ -3,9 +3,9 @@
 #include "ToolIpcProtocol.h"
 #include "FileManager.h"
 #include "ConfigManager.h"
-#include "TagManager.h"
 #include "Logger.h"
 #include "ToolDescriptorParser.h"
+#include "ToolRuntimeContext.h"
 
 #include <QApplication>
 #include <QLocalSocket>
@@ -20,6 +20,7 @@
 #include <QFile>
 #include <QEventLoop>
 #include <QThread>
+#include <QElapsedTimer>
 
 #ifdef Q_OS_WIN
 #include <windows.h>
@@ -37,6 +38,10 @@ public:
         , m_sidebarWidget(nullptr)
         , m_requestId(0)
         , m_dataReady(false)
+        , m_connectRetryCount(0)
+        , m_connectedOnce(false)
+        , m_retryScheduled(false)
+        , m_shutdownRequested(false)
     {
         m_socket = new QLocalSocket(this);
         connect(m_socket, &QLocalSocket::connected, this, &ToolHostApp::onConnected);
@@ -76,12 +81,27 @@ public:
             return false;
         }
         
+        ToolRuntimeContext::instance().setPluginBinaryPathResolver(
+            [this](const QString& pluginName, QString* outPath, QString* errorMessage) {
+                return requestAuthorizedPluginBinaryPath(pluginName, outPath, errorMessage);
+            }
+        );
+
         m_tool->initialize();
         qDebug() << "Tool loaded:" << m_tool->id();
         return true;
     }
     
     void connectToServer() {
+        if (m_shutdownRequested) {
+            return;
+        }
+
+        if (m_socket->state() == QLocalSocket::ConnectedState
+            || m_socket->state() == QLocalSocket::ConnectingState) {
+            return;
+        }
+
         qDebug() << "Connecting to server:" << m_serverName;
         m_socket->connectToServer(m_serverName);
     }
@@ -89,6 +109,9 @@ public:
 private slots:
     void onConnected() {
         qDebug() << "Connected to main process";
+        m_connectedOnce = true;
+        m_connectRetryCount = 0;
+        m_retryScheduled = false;
         m_heartbeatTimer->start(ToolIpc::HEARTBEAT_INTERVAL_MS);
         
         // Send ready signal with tool info FIRST (don't block)
@@ -110,17 +133,67 @@ private slots:
     }
     
     void onDisconnected() {
-        qDebug() << "Disconnected from main process, exiting...";
         m_heartbeatTimer->stop();
+
+        if (m_shutdownRequested) {
+            qDebug() << "Disconnected from main process during shutdown, exiting...";
+            QApplication::quit();
+            return;
+        }
+
+        qDebug() << "Disconnected from main process, exiting...";
         QApplication::quit();
     }
     
     void onError(QLocalSocket::LocalSocketError error) {
         qCritical() << "Socket error:" << error << m_socket->errorString();
-        if (error == QLocalSocket::ServerNotFoundError || 
-            error == QLocalSocket::ConnectionRefusedError) {
-            QTimer::singleShot(1000, this, &ToolHostApp::connectToServer);
+
+        if (m_shutdownRequested) {
+            return;
         }
+
+        const bool isRetryableError =
+            error == QLocalSocket::ServerNotFoundError ||
+            error == QLocalSocket::ConnectionRefusedError;
+
+        if (!isRetryableError) {
+            if (!m_connectedOnce) {
+                qCritical() << "Tool host failed before establishing IPC, exiting.";
+                QApplication::quit();
+            }
+            return;
+        }
+
+        if (m_connectedOnce) {
+            qCritical() << "IPC server disappeared after connection, exiting tool host.";
+            QApplication::quit();
+            return;
+        }
+
+        constexpr int kMaxInitialConnectRetries = 4;
+        constexpr int kRetryDelayMs = 150;
+
+        if (m_retryScheduled) {
+            return;
+        }
+
+        if (m_connectRetryCount >= kMaxInitialConnectRetries) {
+            qCritical() << "IPC connection retries exhausted, exiting tool host.";
+            QApplication::quit();
+            return;
+        }
+
+        ++m_connectRetryCount;
+        m_retryScheduled = true;
+        qWarning() << "Retrying IPC connection"
+                   << m_connectRetryCount
+                   << "/"
+                   << kMaxInitialConnectRetries;
+
+        QTimer::singleShot(kRetryDelayMs, this, [this]() {
+            m_retryScheduled = false;
+            connectToServer();
+        });
     }
     
     void onReadyRead() {
@@ -191,7 +264,7 @@ private:
             
         case ToolIpc::MessageType::ConfigResponse:
         case ToolIpc::MessageType::FileIndexResponse:
-        case ToolIpc::MessageType::TagsResponse:
+        case ToolIpc::MessageType::PluginBinaryPathResponse:
             handleDataResponse(msg);
             break;
             
@@ -481,6 +554,63 @@ private:
         sendMessage(ToolIpc::MessageType::ToolInfoResponse, payload, msg.requestId);
     }
     
+    bool requestAuthorizedPluginBinaryPath(const QString& pluginName, QString* outPath, QString* errorMessage) {
+        if (pluginName.trimmed().isEmpty()) {
+            if (errorMessage) {
+                *errorMessage = "Plugin name is empty.";
+            }
+            return false;
+        }
+
+        if (m_socket->state() != QLocalSocket::ConnectedState) {
+            if (errorMessage) {
+                *errorMessage = "IPC socket is not connected.";
+            }
+            return false;
+        }
+
+        const quint32 requestId = ++m_requestId;
+        QJsonObject payload;
+        payload["pluginName"] = pluginName.trimmed();
+
+        m_pluginPathRequestCompleted = false;
+        m_pluginPathRequestSuccess = false;
+        m_pluginPathRequestPath.clear();
+        m_pluginPathRequestError.clear();
+        m_pluginPathRequestRequestId = requestId;
+
+        sendMessage(ToolIpc::MessageType::GetPluginBinaryPath, payload, requestId);
+
+        QElapsedTimer timer;
+        timer.start();
+        while (!m_pluginPathRequestCompleted && timer.elapsed() < 5000) {
+            QCoreApplication::processEvents(QEventLoop::AllEvents, 20);
+            QThread::msleep(10);
+        }
+
+        if (!m_pluginPathRequestCompleted) {
+            if (errorMessage) {
+                *errorMessage = QString("Timed out while requesting plugin %1.").arg(pluginName);
+            }
+            m_pluginPathRequestRequestId = 0;
+            return false;
+        }
+
+        m_pluginPathRequestRequestId = 0;
+
+        if (!m_pluginPathRequestSuccess) {
+            if (errorMessage) {
+                *errorMessage = m_pluginPathRequestError;
+            }
+            return false;
+        }
+
+        if (outPath) {
+            *outPath = m_pluginPathRequestPath;
+        }
+        return true;
+    }
+
     void handleDataResponse(const ToolIpc::Message& msg) {
         switch (msg.type) {
         case ToolIpc::MessageType::ConfigResponse:
@@ -494,20 +624,21 @@ private:
             qDebug() << "Received file index data from main process";
             m_fileIndexReceived = true;
             break;
-            
-        case ToolIpc::MessageType::TagsResponse:
-            if (msg.payload.contains("tags")) {
-                TagManager::instance().setFromJson(msg.payload["tags"].toObject());
+
+        case ToolIpc::MessageType::PluginBinaryPathResponse:
+            if (msg.requestId == m_pluginPathRequestRequestId) {
+                m_pluginPathRequestCompleted = true;
+                m_pluginPathRequestSuccess = msg.payload.value("success").toBool();
+                m_pluginPathRequestPath = msg.payload.value("libraryPath").toString();
+                m_pluginPathRequestError = msg.payload.value("error").toString();
             }
-            qDebug() << "Received tags data from main process";
-            m_tagsReceived = true;
             break;
             
         default:
             break;
         }
         
-        if (m_configReceived && m_fileIndexReceived && m_tagsReceived) {
+        if (m_configReceived && m_fileIndexReceived) {
             m_dataReady = true;
             if (m_dataWaitLoop) {
                 m_dataWaitLoop->quit();
@@ -517,6 +648,7 @@ private:
     
     void handleShutdown() {
         qDebug() << "Handling shutdown - hiding widgets first";
+        m_shutdownRequested = true;
         
         if (m_mainWidget) {
 #ifdef Q_OS_WIN
@@ -554,12 +686,10 @@ private:
     void requestInitialDataAsync() {
         m_configReceived = false;
         m_fileIndexReceived = false;
-        m_tagsReceived = false;
         m_dataReady = false;
         
         sendMessage(ToolIpc::MessageType::GetConfig);
         sendMessage(ToolIpc::MessageType::GetFileIndex);
-        sendMessage(ToolIpc::MessageType::GetTags);
         
         qDebug() << "Requested initial data from main process (async)";
     }
@@ -584,8 +714,16 @@ private:
     
     bool m_configReceived = false;
     bool m_fileIndexReceived = false;
-    bool m_tagsReceived = false;
     bool m_dataReady = false;
+    int m_connectRetryCount = 0;
+    bool m_connectedOnce = false;
+    bool m_retryScheduled = false;
+    bool m_shutdownRequested = false;
+    bool m_pluginPathRequestCompleted = false;
+    bool m_pluginPathRequestSuccess = false;
+    quint32 m_pluginPathRequestRequestId = 0;
+    QString m_pluginPathRequestPath;
+    QString m_pluginPathRequestError;
     QEventLoop* m_dataWaitLoop = nullptr;
 };
 

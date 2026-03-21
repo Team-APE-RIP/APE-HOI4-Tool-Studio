@@ -13,6 +13,7 @@
 #include <QDateTime>
 #include <QJsonObject>
 #include <QJsonArray>
+#include <atomic>
 #include "RecursiveFileSystemWatcher.h"
 
 struct FileDetails {
@@ -73,17 +74,18 @@ private:
         QStringList watchedPaths;
     };
     
-    static ScanResult doScan(const QString& gamePath, const QString& modPath, const QStringList& ignoreDirs);
+    static ScanResult doScan(const QString& gamePath, const QString& modPath, const QStringList& ignoreDirs, const std::atomic_bool* stopRequested);
     
-    static void scanGameDirectory(const QString& gamePath, const QStringList& ignoreDirs, ScanResult& result);
-    static void scanModDirectory(const QString& modPath, const QStringList& ignoreDirs, ScanResult& result);
-    static void scanDlcDirectory(const QString& dlcPath, const QStringList& ignoreDirs, ScanResult& result);
+    static void scanGameDirectory(const QString& gamePath, const QStringList& ignoreDirs, ScanResult& result, const std::atomic_bool* stopRequested);
+    static void scanModDirectory(const QString& modPath, const QStringList& ignoreDirs, ScanResult& result, const std::atomic_bool* stopRequested);
+    static void scanDlcDirectory(const QString& dlcPath, const QStringList& ignoreDirs, ScanResult& result, const std::atomic_bool* stopRequested);
     
     static void scanDirectoryRecursive(const QString& rootPath, const QString& currentPath, 
                                      bool isMod, bool isDlc, 
                                      const QStringList& ignoreDirs, 
                                      const QSet<QString>& replacePaths,
-                                     ScanResult& result);
+                                     ScanResult& result,
+                                     const std::atomic_bool* stopRequested);
     
     static void processFile(const QString& absPath, const QString& relPath, bool isMod, bool isDlc, ScanResult& result);
     static void extractZip(const QString& zipPath, const QString& destPath);
@@ -103,6 +105,7 @@ private:
     mutable QMutex m_mutex;
     
     bool m_isScanning = false;
+    std::atomic_bool m_stopRequested = false;
 };
 
 #endif // FILEMANAGER_H

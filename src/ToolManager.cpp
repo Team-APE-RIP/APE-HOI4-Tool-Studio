@@ -282,7 +282,6 @@ void ToolManager::setToolActive(bool active) {
 void ToolManager::unloadTools() {
     Logger::instance().logInfo("ToolManager", "Unloading all tools...");
     
-    // Force kill all tool proxy processes immediately (no waiting)
     for (ToolInterface* tool : m_tools) {
         ToolProxyInterface* proxy = dynamic_cast<ToolProxyInterface*>(tool);
         if (proxy) {
@@ -294,6 +293,51 @@ void ToolManager::unloadTools() {
     m_activeToolProxy = nullptr;
     
     Logger::instance().logInfo("ToolManager", "All tools unloaded");
+}
+
+bool ToolManager::unloadToolsAndWait(int timeoutMsPerTool) {
+    Logger::instance().logInfo(
+        "ToolManager",
+        QString("Unloading all tools with wait, timeout per tool: %1 ms").arg(timeoutMsPerTool)
+    );
+
+    bool allStopped = true;
+
+    for (ToolInterface* tool : m_tools) {
+        ToolProxyInterface* proxy = dynamic_cast<ToolProxyInterface*>(tool);
+        if (!proxy) {
+            continue;
+        }
+
+        if (!proxy->isProcessRunning()) {
+            continue;
+        }
+
+        proxy->stopProcess();
+        if (!proxy->waitForProcessStopped(timeoutMsPerTool)) {
+            Logger::instance().logWarning(
+                "ToolManager",
+                QString("Tool process did not confirm stop in time: %1").arg(proxy->id())
+            );
+            proxy->forceKillProcess();
+            if (!proxy->waitForProcessStopped(timeoutMsPerTool)) {
+                Logger::instance().logError(
+                    "ToolManager",
+                    QString("Tool process still running after force kill: %1").arg(proxy->id())
+                );
+                allStopped = false;
+            }
+        }
+    }
+
+    m_isToolActive = false;
+    m_activeToolProxy = nullptr;
+
+    Logger::instance().logInfo(
+        "ToolManager",
+        QString("All tools unload with wait completed: %1").arg(allStopped ? "success" : "partial_failure")
+    );
+    return allStopped;
 }
 
 void ToolManager::requestQuestionDialog(const QString& title, const QString& message, 

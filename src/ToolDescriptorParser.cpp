@@ -1,6 +1,7 @@
 #include "ToolDescriptorParser.h"
 
 #include <QFile>
+#include <QJsonArray>
 #include <QRegularExpression>
 #include <QStringList>
 
@@ -25,6 +26,37 @@ bool parseLine(const QString& line, QString& key, QString& value) {
     value = match.captured(2);
     return !key.isEmpty();
 }
+
+bool isCommentOrEmpty(const QString& line) {
+    const QString trimmed = line.trimmed();
+    return trimmed.isEmpty() || trimmed.startsWith("#") || trimmed.startsWith("//");
+}
+
+QJsonArray parseDependenciesBlock(const QStringList& lines, int& index) {
+    QJsonArray dependencies;
+
+    for (++index; index < lines.size(); ++index) {
+        QString line = lines[index];
+        line.replace("\r", "");
+        const QString trimmed = line.trimmed();
+
+        if (isCommentOrEmpty(trimmed)) {
+            continue;
+        }
+
+        if (trimmed == "}") {
+            break;
+        }
+
+        static const QRegularExpression dependencyPattern("^\"([^\"]+)\"\\s*$");
+        const QRegularExpressionMatch match = dependencyPattern.match(trimmed);
+        if (match.hasMatch()) {
+            dependencies.append(match.captured(1).trimmed());
+        }
+    }
+
+    return dependencies;
+}
 }
 
 namespace ToolDescriptorParser {
@@ -45,9 +77,22 @@ bool parseDescriptorFile(const QString& filePath, QJsonObject& outMetaData, QStr
     QString version;
     QString supportedVersion;
     QString author;
+    QJsonArray dependencies;
 
-    for (QString line : lines) {
+    for (int i = 0; i < lines.size(); ++i) {
+        QString line = lines[i];
         line.replace("\r", "");
+        const QString trimmed = line.trimmed();
+
+        if (isCommentOrEmpty(trimmed)) {
+            continue;
+        }
+
+        if (trimmed == "dependencies={") {
+            dependencies = parseDependenciesBlock(lines, i);
+            continue;
+        }
+
         QString key;
         QString value;
         if (!parseLine(line, key, value)) {
@@ -76,10 +121,23 @@ bool parseDescriptorFile(const QString& filePath, QJsonObject& outMetaData, QStr
         {"id", name},
         {"version", version},
         {"compatibleVersion", supportedVersion},
-        {"author", author}
+        {"author", author},
+        {"dependencies", dependencies}
     };
 
     return true;
+}
+
+QStringList extractDependencies(const QJsonObject& metaData) {
+    QStringList dependencies;
+    const QJsonArray array = metaData.value("dependencies").toArray();
+    for (const QJsonValue& value : array) {
+        const QString dependency = value.toString().trimmed();
+        if (!dependency.isEmpty()) {
+            dependencies.append(dependency);
+        }
+    }
+    return dependencies;
 }
 
 }

@@ -39,17 +39,23 @@ FileManager::FileManager() {
 
 void FileManager::startScanning() {
     if (m_isScanning) return;
+
+    m_stopRequested = false;
     
     // Trigger scan immediately
     onDebounceTimerTimeout();
 }
 
 void FileManager::stopScanning() {
+    m_stopRequested = true;
     m_debounceTimer->stop();
+    m_watcher->removeAllPaths();
+
     if (m_futureWatcher->isRunning()) {
         m_futureWatcher->waitForFinished();
     }
-    m_watcher->removeAllPaths();
+
+    m_isScanning = false;
 }
 
 void FileManager::onFileChanged(const QString& path) {
@@ -73,14 +79,20 @@ void FileManager::onDebounceTimerTimeout() {
     QStringList ignoreDirs = m_ignoreDirs;
     
     // Run scan in background thread
-    QFuture<ScanResult> future = QtConcurrent::run([gamePath, modPath, ignoreDirs]() {
-        return doScan(gamePath, modPath, ignoreDirs);
+    QFuture<ScanResult> future = QtConcurrent::run([gamePath, modPath, ignoreDirs, this]() {
+        return doScan(gamePath, modPath, ignoreDirs, &m_stopRequested);
     });
     m_futureWatcher->setFuture(future);
 }
 
 void FileManager::onScanFinished() {
     ScanResult result = m_futureWatcher->result();
+
+    if (m_stopRequested) {
+        m_isScanning = false;
+        Logger::instance().logInfo("FileManager", "Scan finished during shutdown, skipping watcher refresh");
+        return;
+    }
     
     {
         QMutexLocker locker(&m_mutex);
@@ -121,12 +133,15 @@ void FileManager::onScanFinished() {
     Logger::instance().logInfo("FileManager", "scanFinished signal emitted");
 }
 
-FileManager::ScanResult FileManager::doScan(const QString& gamePath, const QString& modPath, const QStringList& ignoreDirs) {
+FileManager::ScanResult FileManager::doScan(const QString& gamePath, const QString& modPath, const QStringList& ignoreDirs, const std::atomic_bool* stopRequested) {
     ScanResult result;
     
     if (gamePath.isEmpty() || modPath.isEmpty()) return result;
+    if (stopRequested && stopRequested->load()) return result;
 
     clearCache();
+
+    if (stopRequested && stopRequested->load()) return result;
 
     // 1. Parse .mod file
     QDir modDirObj(modPath);
@@ -151,13 +166,16 @@ FileManager::ScanResult FileManager::doScan(const QString& gamePath, const QStri
     }
 
     // 2. Scan Game Directory
-    scanGameDirectory(gamePath, ignoreDirs, result);
+    scanGameDirectory(gamePath, ignoreDirs, result, stopRequested);
+    if (stopRequested && stopRequested->load()) return result;
 
     // 3. Scan DLCs
-    scanDlcDirectory(gamePath + "/dlc", ignoreDirs, result);
+    scanDlcDirectory(gamePath + "/dlc", ignoreDirs, result, stopRequested);
+    if (stopRequested && stopRequested->load()) return result;
 
     // 4. Scan Mod Directory
-    scanModDirectory(modPath, ignoreDirs, result);
+    scanModDirectory(modPath, ignoreDirs, result, stopRequested);
+    if (stopRequested && stopRequested->load()) return result;
     
     // Add root paths to watcher
     result.watchedPaths.append(gamePath);
@@ -166,12 +184,14 @@ FileManager::ScanResult FileManager::doScan(const QString& gamePath, const QStri
     return result;
 }
 
-void FileManager::scanGameDirectory(const QString& gamePath, const QStringList& ignoreDirs, ScanResult& result) {
+void FileManager::scanGameDirectory(const QString& gamePath, const QStringList& ignoreDirs, ScanResult& result, const std::atomic_bool* stopRequested) {
     QDir dir(gamePath);
     if (!dir.exists()) return;
+    if (stopRequested && stopRequested->load()) return;
 
     QStringList subDirs = dir.entryList(QDir::Dirs | QDir::NoDotAndDotDot);
     for (const QString& subDir : subDirs) {
+        if (stopRequested && stopRequested->load()) return;
         if (subDir == "dlc") continue; // Handled separately
         if (ignoreDirs.contains(subDir)) continue;
         
@@ -189,42 +209,47 @@ void FileManager::scanGameDirectory(const QString& gamePath, const QStringList& 
             continue;
         }
 
-        scanDirectoryRecursive(gamePath, subDir, false, false, ignoreDirs, result.replacePaths, result);
+        scanDirectoryRecursive(gamePath, subDir, false, false, ignoreDirs, result.replacePaths, result, stopRequested);
     }
 }
 
-void FileManager::scanModDirectory(const QString& modPath, const QStringList& ignoreDirs, ScanResult& result) {
+void FileManager::scanModDirectory(const QString& modPath, const QStringList& ignoreDirs, ScanResult& result, const std::atomic_bool* stopRequested) {
     QDir dir(modPath);
     if (!dir.exists()) return;
+    if (stopRequested && stopRequested->load()) return;
 
     QStringList subDirs = dir.entryList(QDir::Dirs | QDir::NoDotAndDotDot);
     for (const QString& subDir : subDirs) {
+        if (stopRequested && stopRequested->load()) return;
         if (ignoreDirs.contains(subDir)) continue;
         
         // Rule 3: Block folders with _assets in name at root level
         if (subDir.contains("_assets", Qt::CaseInsensitive)) continue;
 
-        scanDirectoryRecursive(modPath, subDir, true, false, ignoreDirs, result.replacePaths, result);
+        scanDirectoryRecursive(modPath, subDir, true, false, ignoreDirs, result.replacePaths, result, stopRequested);
     }
 }
 
-void FileManager::scanDlcDirectory(const QString& dlcPath, const QStringList& ignoreDirs, ScanResult& result) {
+void FileManager::scanDlcDirectory(const QString& dlcPath, const QStringList& ignoreDirs, ScanResult& result, const std::atomic_bool* stopRequested) {
     QDir dir(dlcPath);
     if (!dir.exists()) return;
+    if (stopRequested && stopRequested->load()) return;
 
     QStringList entries = dir.entryList(QDir::Dirs | QDir::Files | QDir::NoDotAndDotDot);
     for (const QString& entry : entries) {
+        if (stopRequested && stopRequested->load()) return;
         QString fullPath = dir.filePath(entry);
         QFileInfo info(fullPath);
 
         if (info.isDir()) {
             // Normal DLC folder
-            scanDirectoryRecursive(fullPath, "", false, true, ignoreDirs, result.replacePaths, result);
+            scanDirectoryRecursive(fullPath, "", false, true, ignoreDirs, result.replacePaths, result, stopRequested);
         } else if (info.isFile() && entry.endsWith(".zip", Qt::CaseInsensitive)) {
             // Zip DLC
             QString cachePath = QStandardPaths::writableLocation(QStandardPaths::TempLocation) + "/APE-HOI4-Tool-Studio/dlc_cache/" + info.baseName();
-            extractZip(fullPath, cachePath);
-            scanDirectoryRecursive(cachePath, "", false, true, ignoreDirs, result.replacePaths, result);
+                extractZip(fullPath, cachePath);
+                if (stopRequested && stopRequested->load()) return;
+                scanDirectoryRecursive(cachePath, "", false, true, ignoreDirs, result.replacePaths, result, stopRequested);
         }
     }
 }
@@ -233,23 +258,27 @@ void FileManager::scanDirectoryRecursive(const QString& rootPath, const QString&
                                        bool isMod, bool isDlc, 
                                        const QStringList& ignoreDirs, 
                                        const QSet<QString>& replacePaths,
-                                       ScanResult& result) {
+                                       ScanResult& result,
+                                       const std::atomic_bool* stopRequested) {
     QDir dir(rootPath + (currentPath.isEmpty() ? "" : "/" + currentPath));
     if (!dir.exists()) return;
+    if (stopRequested && stopRequested->load()) return;
 
     QFileInfoList entries = dir.entryInfoList(QDir::Files | QDir::Dirs | QDir::NoDotAndDotDot);
     
     for (const QFileInfo& entry : entries) {
+        if (stopRequested && stopRequested->load()) return;
         QString relPath = currentPath.isEmpty() ? entry.fileName() : currentPath + "/" + entry.fileName();
         
         if (entry.isDir()) {
-            scanDirectoryRecursive(rootPath, relPath, isMod, isDlc, ignoreDirs, replacePaths, result);
+            scanDirectoryRecursive(rootPath, relPath, isMod, isDlc, ignoreDirs, replacePaths, result, stopRequested);
         } else {
             // Check if it's a zip file inside a DLC directory (recursively found)
             if (isDlc && entry.fileName().endsWith(".zip", Qt::CaseInsensitive)) {
                 QString cachePath = QStandardPaths::writableLocation(QStandardPaths::TempLocation) + "/APE-HOI4-Tool-Studio/dlc_cache/" + entry.baseName();
                 extractZip(entry.absoluteFilePath(), cachePath);
-                scanDirectoryRecursive(cachePath, currentPath, isMod, isDlc, ignoreDirs, replacePaths, result);
+                if (stopRequested && stopRequested->load()) return;
+                scanDirectoryRecursive(cachePath, currentPath, isMod, isDlc, ignoreDirs, replacePaths, result, stopRequested);
             } else {
                 processFile(entry.absoluteFilePath(), relPath, isMod, isDlc, result);
             }

@@ -4,7 +4,9 @@
 #include <QString>
 #include <QJsonObject>
 #include <QJsonDocument>
+#include <QJsonArray>
 #include <QByteArray>
+#include <QStringList>
 
 namespace ToolIpc {
 
@@ -39,8 +41,8 @@ enum class MessageType : quint32 {
     ConfigResponse = 41,
     GetFileIndex = 42,
     FileIndexResponse = 43,
-    GetTags = 44,
-    TagsResponse = 45,
+    GetPluginBinaryPath = 44,
+    PluginBinaryPathResponse = 45,
     
     // Data notifications (Host -> Tool)
     ConfigChanged = 50,
@@ -111,6 +113,7 @@ struct ToolInfo {
     QString compatibleVersion;
     QString author;
     QString iconPath;
+    QStringList dependencies;
     
     QJsonObject toJson() const {
         QJsonObject obj;
@@ -121,6 +124,12 @@ struct ToolInfo {
         obj["compatibleVersion"] = compatibleVersion;
         obj["author"] = author;
         obj["iconPath"] = iconPath;
+
+        QJsonArray dependencyArray;
+        for (const QString& dependency : dependencies) {
+            dependencyArray.append(dependency);
+        }
+        obj["dependencies"] = dependencyArray;
         return obj;
     }
     
@@ -133,6 +142,14 @@ struct ToolInfo {
         info.compatibleVersion = obj["compatibleVersion"].toString();
         info.author = obj["author"].toString();
         info.iconPath = obj["iconPath"].toString();
+
+        const QJsonArray dependencyArray = obj["dependencies"].toArray();
+        for (const QJsonValue& value : dependencyArray) {
+            const QString dependency = value.toString().trimmed();
+            if (!dependency.isEmpty()) {
+                info.dependencies.append(dependency);
+            }
+        }
         return info;
     }
 };

@@ -16,27 +16,27 @@ WatcherThread::WatcherThread(const QString& path, QObject* parent)
 
 WatcherThread::~WatcherThread() {
     stop();
-    if (m_hDir != INVALID_HANDLE_VALUE) {
-        CloseHandle(m_hDir);
-    }
 }
 
 void WatcherThread::stop() {
     m_running = false;
-    // CancelSynchronousIo(m_hDir); // Not safe to call from another thread without thread handle
-    // Just wait? ReadDirectoryChangesW is blocking.
-    // We can use CancelIoEx if we have the handle.
+
     if (m_hDir != INVALID_HANDLE_VALUE) {
         CancelIoEx(m_hDir, NULL);
+        CloseHandle(m_hDir);
+        m_hDir = INVALID_HANDLE_VALUE;
     }
-    wait();
+
+    if (isRunning()) {
+        wait();
+    }
 }
 
 void WatcherThread::run() {
     if (m_hDir == INVALID_HANDLE_VALUE) return;
 
     char buffer[4096];
-    DWORD bytesReturned;
+    DWORD bytesReturned = 0;
     
     while (m_running) {
         if (ReadDirectoryChangesW(

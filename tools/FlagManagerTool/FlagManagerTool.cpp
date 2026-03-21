@@ -21,22 +21,126 @@
 #include <QWheelEvent>
 #include <QFileInfo>
 #include <QImageReader>
-#include "../../src/TagManager.h"
+#include <QLibrary>
 #include "../../src/FileManager.h"
 #include "../../src/ConfigManager.h"
 #include "../../src/Logger.h"
 #include "../../src/ToolManager.h"
 #include "../../src/CustomMessageBox.h"
+#include "../../src/ToolDescriptorParser.h"
+#include "../../src/ToolRuntimeContext.h"
 #include <QMenu>
 
 #ifdef Q_OS_WIN
 #include <windows.h>
 #include <wincodec.h>
-#include <comdef.h>
-#include <DirectXTex.h>
 #pragma comment(lib, "windowscodecs.lib")
 #pragma comment(lib, "ole32.lib")
 #endif
+
+namespace {
+using TagListGetTagsJsonFn = const char* (*)();
+
+#ifdef Q_OS_WIN
+using DirectXTexLoadDDSFn = int (*)(const wchar_t*, unsigned char**, int*, int*, int*);
+using DirectXTexFreeImageFn = void (*)(unsigned char*);
+using DirectXTexGetLastErrorFn = const char* (*)();
+#endif
+
+QString findPluginBinaryPath(const QString& pluginName) {
+    QString libraryPath;
+    QString errorMessage;
+    if (!ToolRuntimeContext::instance().requestAuthorizedPluginBinaryPath(pluginName, &libraryPath, &errorMessage)) {
+        Logger::instance().logWarning(
+            "FlagManagerTool",
+            QString("Failed to resolve authorized plugin path for %1: %2").arg(pluginName, errorMessage)
+        );
+        return {};
+    }
+
+    return libraryPath;
+}
+
+QMap<QString, QString> loadTagsFromPluginRuntime() {
+    QMap<QString, QString> tags;
+
+    const QString libraryPath = findPluginBinaryPath("TagList");
+    if (libraryPath.isEmpty()) {
+        Logger::instance().logWarning("FlagManagerTool", "TagList plugin binary not found.");
+        return tags;
+    }
+
+    QLibrary library(libraryPath);
+    if (!library.load()) {
+        Logger::instance().logWarning("FlagManagerTool", "Failed to load TagList plugin: " + library.errorString());
+        return tags;
+    }
+
+    auto getTagsJson = reinterpret_cast<TagListGetTagsJsonFn>(library.resolve("APE_TagList_GetTagsJson"));
+    if (!getTagsJson) {
+        Logger::instance().logWarning("FlagManagerTool", "Failed to resolve APE_TagList_GetTagsJson.");
+        return tags;
+    }
+
+    const QByteArray jsonData(getTagsJson());
+    const QJsonDocument document = QJsonDocument::fromJson(jsonData);
+    if (!document.isObject()) {
+        Logger::instance().logWarning("FlagManagerTool", "TagList plugin returned invalid JSON.");
+        return tags;
+    }
+
+    const QJsonObject object = document.object();
+    for (auto it = object.begin(); it != object.end(); ++it) {
+        tags.insert(it.key(), it.value().toString());
+    }
+
+    return tags;
+}
+
+#ifdef Q_OS_WIN
+static QImage loadDdsWithDirectXTex(const QString& path) {
+    QImage result;
+
+    const QString libraryPath = findPluginBinaryPath("DirectXTex");
+    if (libraryPath.isEmpty()) {
+        Logger::instance().logWarning("FlagManagerTool", "DirectXTex plugin binary not found.");
+        return result;
+    }
+
+    QLibrary library(libraryPath);
+    if (!library.load()) {
+        Logger::instance().logWarning("FlagManagerTool", "Failed to load DirectXTex plugin: " + library.errorString());
+        return result;
+    }
+
+    auto loadDdsImage = reinterpret_cast<DirectXTexLoadDDSFn>(library.resolve("APE_DirectXTex_LoadDDSImage"));
+    auto freeImage = reinterpret_cast<DirectXTexFreeImageFn>(library.resolve("APE_DirectXTex_FreeImage"));
+    auto getLastError = reinterpret_cast<DirectXTexGetLastErrorFn>(library.resolve("APE_DirectXTex_GetLastError"));
+
+    if (!loadDdsImage || !freeImage) {
+        Logger::instance().logWarning("FlagManagerTool", "DirectXTex plugin exports are incomplete.");
+        return result;
+    }
+
+    unsigned char* bytes = nullptr;
+    int width = 0;
+    int height = 0;
+    int stride = 0;
+
+    const int success = loadDdsImage(reinterpret_cast<const wchar_t*>(path.utf16()), &bytes, &width, &height, &stride);
+    if (!success || !bytes || width <= 0 || height <= 0 || stride <= 0) {
+        const QString errorMessage = getLastError ? QString::fromUtf8(getLastError()) : QString("Unknown DirectXTex plugin error.");
+        Logger::instance().logWarning("FlagManagerTool", "DirectXTex plugin failed: " + errorMessage);
+        return result;
+    }
+
+    QImage image(bytes, width, height, stride, QImage::Format_ARGB32);
+    result = image.copy();
+    freeImage(bytes);
+    return result;
+}
+#endif
+}
 
 // --- ImagePreviewWidget ---
 
@@ -678,76 +782,6 @@ void FlagConverterWidget::fillNameFromFileName() {
     }
 }
 
-// 使用 DirectXTex 加载 DDS 文件
-#ifdef Q_OS_WIN
-static QImage loadDdsWithDirectXTex(const QString& path) {
-    QImage result;
-    
-    std::wstring wpath = path.toStdWString();
-    
-    DirectX::TexMetadata metadata;
-    DirectX::ScratchImage scratchImage;
-    
-    // 加载 DDS 文件
-    HRESULT hr = DirectX::LoadFromDDSFile(wpath.c_str(), DirectX::DDS_FLAGS_NONE, &metadata, scratchImage);
-    if (FAILED(hr)) {
-        return result;
-    }
-    
-    // 如果是压缩格式，需要解压
-    DirectX::ScratchImage decompressedImage;
-    const DirectX::Image* srcImage = scratchImage.GetImage(0, 0, 0);
-    
-    if (DirectX::IsCompressed(metadata.format)) {
-        hr = DirectX::Decompress(*srcImage, DXGI_FORMAT_R8G8B8A8_UNORM, decompressedImage);
-        if (FAILED(hr)) {
-            return result;
-        }
-        srcImage = decompressedImage.GetImage(0, 0, 0);
-    }
-    
-    // 转换为 RGBA8 格式（如果还不是）
-    DirectX::ScratchImage convertedImage;
-    if (srcImage->format != DXGI_FORMAT_R8G8B8A8_UNORM && srcImage->format != DXGI_FORMAT_B8G8R8A8_UNORM) {
-        hr = DirectX::Convert(*srcImage, DXGI_FORMAT_R8G8B8A8_UNORM, DirectX::TEX_FILTER_DEFAULT, DirectX::TEX_THRESHOLD_DEFAULT, convertedImage);
-        if (FAILED(hr)) {
-            return result;
-        }
-        srcImage = convertedImage.GetImage(0, 0, 0);
-    }
-    
-    // 创建 QImage
-    int width = static_cast<int>(srcImage->width);
-    int height = static_cast<int>(srcImage->height);
-    
-    if (srcImage->format == DXGI_FORMAT_B8G8R8A8_UNORM) {
-        // BGRA 格式可以直接使用
-        result = QImage(width, height, QImage::Format_ARGB32);
-        for (int y = 0; y < height; ++y) {
-            const uint8_t* srcRow = srcImage->pixels + y * srcImage->rowPitch;
-            QRgb* destRow = reinterpret_cast<QRgb*>(result.scanLine(y));
-            memcpy(destRow, srcRow, width * 4);
-        }
-    } else {
-        // RGBA 格式需要转换为 BGRA
-        result = QImage(width, height, QImage::Format_ARGB32);
-        for (int y = 0; y < height; ++y) {
-            const uint8_t* srcRow = srcImage->pixels + y * srcImage->rowPitch;
-            QRgb* destRow = reinterpret_cast<QRgb*>(result.scanLine(y));
-            for (int x = 0; x < width; ++x) {
-                uint8_t r = srcRow[x * 4 + 0];
-                uint8_t g = srcRow[x * 4 + 1];
-                uint8_t b = srcRow[x * 4 + 2];
-                uint8_t a = srcRow[x * 4 + 3];
-                destRow[x] = qRgba(r, g, b, a);
-            }
-        }
-    }
-    
-    return result;
-}
-#endif
-
 // 使用 Windows WIC 加载图片（支持 WebP, JXR 等格式）
 #ifdef Q_OS_WIN
 static QImage loadImageWithWIC(const QString& path) {
@@ -1093,8 +1127,8 @@ void FlagBrowserWidget::refreshData() {
     m_flagPaths.clear();
     Logger::instance().logInfo("FlagBrowserWidget", "Cleared");
     
-    Logger::instance().logInfo("FlagBrowserWidget", "Getting tags from TagManager...");
-    QMap<QString, QString> allTags = TagManager::instance().getTags();
+    Logger::instance().logInfo("FlagBrowserWidget", "Getting tags from TagList plugin...");
+    QMap<QString, QString> allTags = loadTagsFromPluginRuntime();
     Logger::instance().logInfo("FlagBrowserWidget", QString("Got %1 tags").arg(allTags.size()));
     
     Logger::instance().logInfo("FlagBrowserWidget", "Creating validTags QSet...");
@@ -1622,6 +1656,7 @@ void FlagManagerTool::setMetaData(const QJsonObject& metaData) {
     m_version = metaData.value("version").toString();
     m_compatibleVersion = metaData.value("compatibleVersion").toString();
     m_author = metaData.value("author").toString();
+    m_dependencies = ToolDescriptorParser::extractDependencies(metaData);
 }
 QIcon FlagManagerTool::icon() const {
     // Try to find the tools directory

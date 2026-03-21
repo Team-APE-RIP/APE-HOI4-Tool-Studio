@@ -6,6 +6,7 @@
 #include <QString>
 #include <QIcon>
 #include <QJsonObject>
+#include <QStringList>
 
 class ToolInterface {
 public:
@@ -18,6 +19,7 @@ public:
     virtual QString version() const = 0;
     virtual QString compatibleVersion() const = 0; // New: Required main program version
     virtual QString author() const = 0;
+    virtual QStringList dependencies() const { return {}; }
     
     // Metadata Injection
     virtual void setMetaData(const QJsonObject& metaData) = 0;

@@ -245,6 +245,7 @@ public:
     QString version() const override { return m_version; }
     QString compatibleVersion() const override { return m_compatibleVersion; }
     QString author() const override { return m_author; }
+    QStringList dependencies() const override { return m_dependencies; }
     
     void setMetaData(const QJsonObject& metaData) override;
     QIcon icon() const override;
@@ -268,6 +269,7 @@ private:
     QString m_version;
     QString m_compatibleVersion;
     QString m_author;
+    QStringList m_dependencies;
 
     FlagManagerMainWidget* m_mainWidget = nullptr;
     FlagListWidget* m_listWidget = nullptr;

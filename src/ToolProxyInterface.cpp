@@ -2,9 +2,9 @@
 #include "Logger.h"
 #include "FileManager.h"
 #include "ConfigManager.h"
-#include "TagManager.h"
 #include "LocalizationManager.h"
 #include "ToolDescriptorParser.h"
+#include "PluginManager.h"
 #include <QVBoxLayout>
 #include <QCoreApplication>
 #include <QFile>
@@ -330,6 +330,7 @@ void ToolProxyInterface::setMetaData(const QJsonObject& metaData) {
     m_toolInfo.version = metaData.value("version").toString();
     m_toolInfo.compatibleVersion = metaData.value("compatibleVersion").toString();
     m_toolInfo.author = metaData.value("author").toString();
+    m_toolInfo.dependencies = ToolDescriptorParser::extractDependencies(metaData);
     m_infoLoaded = true;
 }
 
@@ -403,6 +404,27 @@ bool ToolProxyInterface::startProcess() {
         Logger::instance().logWarning("ToolProxyInterface", "Process already running");
         return true;
     }
+
+    m_stopping = false;
+    m_processReady = false;
+    m_pendingRequests.clear();
+    m_buffer.clear();
+
+    if (m_socket) {
+        m_socket->abort();
+        m_socket = nullptr;
+    }
+
+    if (m_server) {
+        m_server->close();
+        delete m_server;
+        m_server = nullptr;
+    }
+
+    if (m_process) {
+        delete m_process;
+        m_process = nullptr;
+    }
     
     // Create IPC server
     m_server = new QLocalServer(this);
@@ -451,12 +473,30 @@ bool ToolProxyInterface::startProcess() {
     return true;
 }
 
+bool ToolProxyInterface::waitForProcessStopped(int timeoutMs) {
+    if (!m_process) {
+        return true;
+    }
+
+    if (m_process->state() == QProcess::NotRunning) {
+        return true;
+    }
+
+    return m_process->waitForFinished(timeoutMs);
+}
+
 void ToolProxyInterface::stopProcess() {
+    if (m_stopping) {
+        return;
+    }
+
     Logger::instance().logInfo("ToolProxyInterface", QString("Stopping process for tool: %1").arg(m_toolInfo.id));
     
+    m_stopping = true;
     m_processReady = false;
+    m_pendingRequests.clear();
+    m_buffer.clear();
     
-    // Stop heartbeat timers first
     if (m_heartbeatTimer) {
         m_heartbeatTimer->stop();
         delete m_heartbeatTimer;
@@ -469,7 +509,6 @@ void ToolProxyInterface::stopProcess() {
         m_heartbeatTimeoutTimer = nullptr;
     }
     
-    // Clean up containers first to release embedded windows
     if (m_mainContainer) {
         Logger::instance().logInfo("ToolProxyInterface", "Releasing main container window");
         m_mainContainer->releaseWindow();
@@ -479,62 +518,74 @@ void ToolProxyInterface::stopProcess() {
         m_sidebarContainer->releaseWindow();
     }
     
-    // Send shutdown message and wait for it to be sent (short timeout)
     if (m_socket && m_socket->state() == QLocalSocket::ConnectedState) {
         Logger::instance().logInfo("ToolProxyInterface", "Sending shutdown message to tool process");
         sendMessage(ToolIpc::MessageType::Shutdown);
         m_socket->flush();
-        m_socket->waitForBytesWritten(200); // Reduced from 1000ms
+        m_socket->waitForBytesWritten(50);
         m_socket->disconnectFromServer();
-        m_socket->waitForDisconnected(100); // Reduced from 500ms
+        m_socket->waitForDisconnected(50);
     }
-    m_socket = nullptr;
-    
-    // Terminate the process with shorter timeouts
-    if (m_process) {
-        if (m_process->state() != QProcess::NotRunning) {
-            Logger::instance().logInfo("ToolProxyInterface", "Waiting for process to finish...");
-            // Give the process a short chance to exit gracefully
-            if (!m_process->waitForFinished(300)) { // Reduced from 1000ms
-                Logger::instance().logInfo("ToolProxyInterface", "Process did not finish, terminating...");
-                m_process->terminate();
-                if (!m_process->waitForFinished(200)) { // Reduced from 1000ms
-                    Logger::instance().logWarning("ToolProxyInterface", "Process did not terminate, killing...");
+
+    if (m_process && m_process->state() != QProcess::NotRunning) {
+        Logger::instance().logInfo("ToolProxyInterface", "Waiting for graceful process exit");
+        if (!waitForProcessStopped(150)) {
+            Logger::instance().logInfo("ToolProxyInterface", "Graceful exit timed out, terminating process");
+            m_process->terminate();
+            if (!waitForProcessStopped(200)) {
+                Logger::instance().logWarning("ToolProxyInterface", "Terminate timed out, force killing process");
 #ifdef Q_OS_WIN
-                    // Force kill using Windows API
-                    HANDLE hProcess = OpenProcess(PROCESS_TERMINATE, FALSE, m_process->processId());
-                    if (hProcess) {
-                        TerminateProcess(hProcess, 1);
-                        CloseHandle(hProcess);
-                    }
-#else
+                HANDLE hProcess = OpenProcess(SYNCHRONIZE | PROCESS_TERMINATE, FALSE, m_process->processId());
+                if (hProcess) {
+                    TerminateProcess(hProcess, 1);
+                    WaitForSingleObject(hProcess, 500);
+                    CloseHandle(hProcess);
+                } else {
                     m_process->kill();
-#endif
-                    m_process->waitForFinished(100); // Reduced from 500ms
+                    waitForProcessStopped(500);
                 }
+#else
+                m_process->kill();
+                waitForProcessStopped(3000);
+#endif
             }
         }
+    }
+
+    if (m_socket) {
+        m_socket->abort();
+        m_socket->deleteLater();
+        m_socket = nullptr;
+    }
+
+    if (m_process) {
         delete m_process;
         m_process = nullptr;
         Logger::instance().logInfo("ToolProxyInterface", "Process stopped");
     }
     
-    // Close the server
     if (m_server) {
         m_server->close();
         delete m_server;
         m_server = nullptr;
     }
     
+    m_stopping = false;
     emit processStopped();
 }
 
 void ToolProxyInterface::forceKillProcess() {
+    if (m_stopping) {
+        return;
+    }
+
     Logger::instance().logInfo("ToolProxyInterface", QString("Force killing process for tool: %1").arg(m_toolInfo.id));
     
+    m_stopping = true;
     m_processReady = false;
+    m_pendingRequests.clear();
+    m_buffer.clear();
     
-    // Stop timers immediately
     if (m_heartbeatTimer) {
         m_heartbeatTimer->stop();
         delete m_heartbeatTimer;
@@ -546,45 +597,59 @@ void ToolProxyInterface::forceKillProcess() {
         m_heartbeatTimeoutTimer = nullptr;
     }
     
-    // Release containers without waiting
     if (m_mainContainer) {
         m_mainContainer->releaseWindow();
     }
     if (m_sidebarContainer) {
         m_sidebarContainer->releaseWindow();
     }
-    
-    // Disconnect socket immediately without waiting
-    if (m_socket) {
-        m_socket->abort();
-        m_socket = nullptr;
+
+    if (m_socket && m_socket->state() == QLocalSocket::ConnectedState) {
+        sendMessage(ToolIpc::MessageType::Shutdown);
+        m_socket->flush();
+        m_socket->waitForBytesWritten(20);
     }
     
-    // Kill process immediately without waiting
-    if (m_process) {
+    if (m_process && m_process->state() != QProcess::NotRunning) {
 #ifdef Q_OS_WIN
-        HANDLE hProcess = OpenProcess(PROCESS_TERMINATE, FALSE, m_process->processId());
+        HANDLE hProcess = OpenProcess(SYNCHRONIZE | PROCESS_TERMINATE, FALSE, m_process->processId());
         if (hProcess) {
             TerminateProcess(hProcess, 1);
+            WaitForSingleObject(hProcess, 500);
             CloseHandle(hProcess);
+        } else {
+            m_process->kill();
+            waitForProcessStopped(500);
         }
 #else
         m_process->kill();
+        waitForProcessStopped(500);
 #endif
+    }
+
+    if (m_socket) {
+        m_socket->abort();
+        m_socket->deleteLater();
+        m_socket = nullptr;
+    }
+    
+    if (m_process) {
         delete m_process;
         m_process = nullptr;
     }
     
-    // Close server
     if (m_server) {
         m_server->close();
         delete m_server;
         m_server = nullptr;
     }
+
+    m_stopping = false;
+    emit processStopped();
 }
 
 bool ToolProxyInterface::isProcessRunning() const {
-    return m_process && m_process->state() == QProcess::Running && m_processReady;
+    return m_process && m_process->state() == QProcess::Running && m_processReady && !m_stopping;
 }
 
 QWidget* ToolProxyInterface::createWidget(QWidget* parent) {
@@ -608,10 +673,7 @@ QWidget* ToolProxyInterface::createWidget(QWidget* parent) {
         
         if (!m_processReady) {
             Logger::instance().logError("ToolProxyInterface", "Tool process did not become ready in time");
-            // Don't call stopProcess here - it might block
-            if (m_process) {
-                m_process->kill();
-            }
+            forceKillProcess();
             return nullptr;
         }
         Logger::instance().logInfo("ToolProxyInterface", "Process is ready");
@@ -853,6 +915,13 @@ void ToolProxyInterface::onSocketReadyRead() {
 }
 
 void ToolProxyInterface::onSocketDisconnected() {
+    if (m_stopping) {
+        Logger::instance().logInfo("ToolProxyInterface", "Tool process socket disconnected during shutdown");
+        m_socket = nullptr;
+        m_processReady = false;
+        return;
+    }
+
     Logger::instance().logWarning("ToolProxyInterface", "Tool process disconnected");
     m_socket = nullptr;
     m_processReady = false;
@@ -872,6 +941,11 @@ void ToolProxyInterface::onProcessFinished(int exitCode, QProcess::ExitStatus ex
         QString("Tool process finished with code %1, status %2").arg(exitCode).arg(exitStatus));
     
     m_processReady = false;
+
+    if (m_stopping) {
+        Logger::instance().logInfo("ToolProxyInterface", "Process finished during shutdown");
+        return;
+    }
     
     if (exitStatus == QProcess::CrashExit) {
         emit processCrashed(QString("Tool process crashed with exit code %1").arg(exitCode));
@@ -889,6 +963,11 @@ void ToolProxyInterface::onProcessError(QProcess::ProcessError error) {
     case QProcess::WriteError: errorStr = "Write error"; break;
     case QProcess::ReadError: errorStr = "Read error"; break;
     default: errorStr = "Unknown error"; break;
+    }
+
+    if (m_stopping) {
+        Logger::instance().logInfo("ToolProxyInterface", "Ignoring process error during shutdown: " + errorStr);
+        return;
     }
     
     Logger::instance().logError("ToolProxyInterface", "Process error: " + errorStr);
@@ -951,7 +1030,7 @@ void ToolProxyInterface::handleMessage(const ToolIpc::Message& msg) {
         
     case ToolIpc::MessageType::GetConfig:
     case ToolIpc::MessageType::GetFileIndex:
-    case ToolIpc::MessageType::GetTags:
+    case ToolIpc::MessageType::GetPluginBinaryPath:
         // Handle data requests from tool
         handleDataRequest(msg);
         break;
@@ -961,6 +1040,10 @@ void ToolProxyInterface::handleMessage(const ToolIpc::Message& msg) {
             QString("Unhandled message type: %1").arg(static_cast<int>(msg.type)));
         break;
     }
+}
+
+bool ToolProxyInterface::isPluginDependencyAuthorized(const QString& pluginName) const {
+    return m_toolInfo.dependencies.contains(pluginName, Qt::CaseSensitive);
 }
 
 void ToolProxyInterface::sendMessage(ToolIpc::MessageType type, const QJsonObject& payload, quint32 requestId) {
@@ -994,11 +1077,53 @@ void ToolProxyInterface::handleDataRequest(const ToolIpc::Message& msg) {
         sendMessage(ToolIpc::MessageType::FileIndexResponse, payload, msg.requestId);
         Logger::instance().logInfo("ToolProxyInterface", "Sent file index data to tool process");
         break;
-        
-    case ToolIpc::MessageType::GetTags:
-        payload["tags"] = TagManager::instance().toJson();
-        sendMessage(ToolIpc::MessageType::TagsResponse, payload, msg.requestId);
-        Logger::instance().logInfo("ToolProxyInterface", "Sent tags data to tool process");
+
+    case ToolIpc::MessageType::GetPluginBinaryPath:
+        {
+            const QString pluginName = msg.payload.value("pluginName").toString().trimmed();
+            payload["pluginName"] = pluginName;
+
+            if (pluginName.isEmpty()) {
+                payload["success"] = false;
+                payload["error"] = "Plugin name is empty.";
+                sendMessage(ToolIpc::MessageType::PluginBinaryPathResponse, payload, msg.requestId);
+                Logger::instance().logWarning("ToolProxyInterface", "Rejected plugin binary path request with empty plugin name");
+                break;
+            }
+
+            if (!isPluginDependencyAuthorized(pluginName)) {
+                payload["success"] = false;
+                payload["error"] = QString("Plugin %1 is not declared in tool dependencies.").arg(pluginName);
+                sendMessage(ToolIpc::MessageType::PluginBinaryPathResponse, payload, msg.requestId);
+                Logger::instance().logWarning(
+                    "ToolProxyInterface",
+                    QString("Rejected unauthorized plugin request from tool %1 for plugin %2").arg(m_toolInfo.id, pluginName)
+                );
+                break;
+            }
+
+            QString libraryPath;
+            QString errorMessage;
+            if (!PluginManager::instance().getPluginBinaryPath(pluginName, &libraryPath, &errorMessage)) {
+                payload["success"] = false;
+                payload["error"] = errorMessage;
+                sendMessage(ToolIpc::MessageType::PluginBinaryPathResponse, payload, msg.requestId);
+                Logger::instance().logWarning(
+                    "ToolProxyInterface",
+                    QString("Failed authorized plugin request from tool %1 for plugin %2: %3")
+                        .arg(m_toolInfo.id, pluginName, errorMessage)
+                );
+                break;
+            }
+
+            payload["success"] = true;
+            payload["libraryPath"] = libraryPath;
+            sendMessage(ToolIpc::MessageType::PluginBinaryPathResponse, payload, msg.requestId);
+            Logger::instance().logInfo(
+                "ToolProxyInterface",
+                QString("Granted plugin binary path to tool %1 for plugin %2").arg(m_toolInfo.id, pluginName)
+            );
+        }
         break;
         
     default:

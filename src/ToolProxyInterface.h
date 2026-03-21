@@ -67,6 +67,7 @@ public:
     QString version() const override { return m_toolInfo.version; }
     QString compatibleVersion() const override { return m_toolInfo.compatibleVersion; }
     QString author() const override { return m_toolInfo.author; }
+    QStringList dependencies() const override { return m_toolInfo.dependencies; }
     
     void setMetaData(const QJsonObject& metaData) override;
     QIcon icon() const override;
@@ -80,6 +81,7 @@ public:
     bool startProcess();
     void stopProcess();
     void forceKillProcess();
+    bool waitForProcessStopped(int timeoutMs);
     bool isProcessRunning() const;
     
     // Check if tool info is loaded (from descriptor.apehts pre-scan)
@@ -105,6 +107,7 @@ private slots:
 private:
     void handleMessage(const ToolIpc::Message& msg);
     void handleDataRequest(const ToolIpc::Message& msg);
+    bool isPluginDependencyAuthorized(const QString& pluginName) const;
     void sendMessage(ToolIpc::MessageType type, const QJsonObject& payload = QJsonObject(), quint32 requestId = 0);
     quint32 nextRequestId() { return ++m_requestIdCounter; }
     
@@ -127,6 +130,7 @@ private:
     ToolIpc::ToolInfo m_toolInfo;
     bool m_infoLoaded;
     bool m_processReady;
+    bool m_stopping = false;
     
     quint32 m_requestIdCounter;
     QMap<quint32, ResponseCallback> m_pendingRequests;

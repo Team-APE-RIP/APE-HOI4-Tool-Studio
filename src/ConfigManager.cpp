@@ -19,6 +19,7 @@ ConfigManager::ConfigManager() {
     m_sidebarCompactMode = false;
     m_maxLogFiles = 10; // Default to 10
     loadConfig();
+    Logger::instance().setMaxLogFiles(m_maxLogFiles);
     
     // Ensure config file exists on first run (create with defaults)
     QFile configFile(getGlobalConfigPath());
@@ -73,6 +74,7 @@ void ConfigManager::loadConfig() {
         if (obj.contains("sidebarCompact")) m_sidebarCompactMode = obj["sidebarCompact"].toBool();
         if (obj.contains("maxLogFiles")) m_maxLogFiles = obj["maxLogFiles"].toInt();
         if (obj.contains("docPath")) m_docPath = obj["docPath"].toString();
+        Logger::instance().setMaxLogFiles(m_maxLogFiles);
         file.close();
     }
 
@@ -150,7 +152,11 @@ bool ConfigManager::getSidebarCompactMode() const { return m_sidebarCompactMode;
 void ConfigManager::setSidebarCompactMode(bool enabled) { m_sidebarCompactMode = enabled; saveConfig(); }
 
 int ConfigManager::getMaxLogFiles() const { return m_maxLogFiles; }
-void ConfigManager::setMaxLogFiles(int count) { m_maxLogFiles = count; saveConfig(); }
+void ConfigManager::setMaxLogFiles(int count) {
+    m_maxLogFiles = count;
+    Logger::instance().setMaxLogFiles(count);
+    saveConfig();
+}
 
 QString ConfigManager::getModPath() const { return m_modPath; }
 void ConfigManager::setModPath(const QString& path) { 
@@ -227,7 +233,9 @@ void ConfigManager::setFromJson(const QJsonObject& obj) {
     if (obj.contains("language")) m_language = obj["language"].toString();
     if (obj.contains("theme")) m_theme = static_cast<Theme>(obj["theme"].toInt());
     if (obj.contains("debugMode")) m_debugMode = obj["debugMode"].toBool();
-    
+    if (obj.contains("maxLogFiles")) m_maxLogFiles = obj["maxLogFiles"].toInt();
+
+    Logger::instance().setMaxLogFiles(m_maxLogFiles);
     Logger::instance().logInfo("ConfigManager", "Loaded config from IPC data");
 }
 
