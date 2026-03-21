@@ -9,10 +9,10 @@
 <div align="center">
 <p>
   <img src="https://img.shields.io/github/stars/Team-APE-RIP/APE-HOI4-Tool-Studio?style=for-the-badge&logo=github&color=7C3AED" alt="stars" />
-  <img src="https://img.shields.io/github/forks/Team-APE-RIP/APE-HOI4-Tool-Studio?style=for-the-badge&logo=github&color=2563EB" alt="forks" />
   <img src="https://img.shields.io/github/issues/Team-APE-RIP/APE-HOI4-Tool-Studio?style=for-the-badge&logo=github&color=DC2626" alt="issues" />
-  <a href="https://github.com/Team-APE-RIP/APE-HTS-SCL">
-    <img src="https://img.shields.io/badge/License-APE--HTS--SCL-ff3a68?style=for-the-badge" alt="License" />
+  <img src="https://img.shields.io/badge/License-APE--HTS--SCL-ff3a68?style=for-the-badge" alt="License" />
+  <a href="https://apehts.czxieddan.top/d-l/">
+    <img src="https://img.shields.io/badge/立即下载-最新版安装包-22C55E?style=for-the-badge&logo=windows&logoColor=white" alt="download latest installer" />
   </a>
 </p>
 </div>
@@ -154,9 +154,6 @@ APE-HOI4-Tool-Studio/
 </a>
 <a href="https://apehts.czxieddan.top/?view=ape-hoi4-tool-studio#ape-hoi4-tool-studio">
   <img src="https://img.shields.io/badge/Product%20Page-APE%20HOI4%20Tool%20Studio-8B5CF6?style=for-the-badge&logo=windows-terminal&logoColor=white" alt="product page" />
-</a>
-<a href="https://github.com/Team-APE-RIP/APE-HOI4-Tool-Studio">
-  <img src="https://img.shields.io/badge/GitHub-Team--APE--RIP%2FAPE--HOI4--Tool--Studio-181717?style=for-the-badge&logo=github" alt="github repo" />
 </a>
 
 </div>
