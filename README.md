@@ -111,7 +111,7 @@
 
 ```text
 Modular / Desktop Native / Tool Ecosystem / Plugin Dependency /
-HOI4 Workflow / Qt UI / Update Service / Auth System / Localization
+HOI4 Tools / Qt UI / Update Service / Auth System / Localization
 ```
 
 ---
@@ -148,14 +148,14 @@ APE-HOI4-Tool-Studio/
 ## 🔗 官方入口
 
 <div align="center">
-
 <a href="https://apehts.czxieddan.top/">
   <img src="https://img.shields.io/badge/Official%20Website-apehts.czxieddan.top-0EA5E9?style=for-the-badge&logo=googlechrome&logoColor=white" alt="official website" />
 </a>
+</div>
+<div align="center">
 <a href="https://apehts.czxieddan.top/?view=ape-hoi4-tool-studio#ape-hoi4-tool-studio">
   <img src="https://img.shields.io/badge/Product%20Page-APE%20HOI4%20Tool%20Studio-8B5CF6?style=for-the-badge&logo=windows-terminal&logoColor=white" alt="product page" />
 </a>
-
 </div>
 
 ---
@@ -177,5 +177,3 @@ APE-HOI4-Tool-Studio/
     <img src="https://api.star-history.com/svg?repos=Team-APE-RIP/APE-HOI4-Tool-Studio&type=Date" alt="Star History Chart" />
   </a>
 </div>
-
-
