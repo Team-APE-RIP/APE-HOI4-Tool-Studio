@@ -28,7 +28,12 @@
 
 ---
 
+
+[![FOSSA Status](https://app.fossa.com/api/projects/git%2Bgithub.com%2FTeam-APE-RIP%2FAPE-HOI4-Tool-Studio.svg?type=large)](https://app.fossa.com/projects/git%2Bgithub.com%2FTeam-APE-RIP%2FAPE-HOI4-Tool-Studio?ref=badge_large)
+
 ## ✨ 项目特色
+[![FOSSA Status](https://app.fossa.com/api/projects/git%2Bgithub.com%2FTeam-APE-RIP%2FAPE-HOI4-Tool-Studio.svg?type=shield)](https://app.fossa.com/projects/git%2Bgithub.com%2FTeam-APE-RIP%2FAPE-HOI4-Tool-Studio?ref=badge_shield)
+
 
 > 不只是一个单体工具，而是一个可持续扩展的 **HOI4 桌面工具平台**。
 
