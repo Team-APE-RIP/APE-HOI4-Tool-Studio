@@ -67,6 +67,11 @@ void ToolManager::setProcessIsolationEnabled(bool enabled) {
 }
 
 void ToolManager::loadTools() {
+    m_tools.clear();
+    m_toolMap.clear();
+    m_isToolActive = false;
+    m_activeToolProxy = nullptr;
+
     if (m_processIsolationEnabled) {
         loadToolsWithIsolation();
     } else {

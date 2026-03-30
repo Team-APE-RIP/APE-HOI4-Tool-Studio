@@ -454,12 +454,13 @@ void FlagConverterWidget::setSidebarList(QTreeWidget* list) {
         disconnect(m_fileList, &QTreeWidget::customContextMenuRequested, this, &FlagConverterWidget::onContextMenuRequested);
     }
     m_fileList = list;
+    m_fileList->clear();
     m_fileList->setColumnCount(2);
     m_fileList->setHeaderHidden(false);
     m_fileList->setContextMenuPolicy(Qt::CustomContextMenu);
     m_fileList->setSelectionMode(QAbstractItemView::ExtendedSelection);
-    
-    m_fileList->clear();
+    m_fileList->setSelectionBehavior(QAbstractItemView::SelectRows);
+
     for (auto it = m_items.begin(); it != m_items.end(); ++it) {
         QTreeWidgetItem* listItem = new QTreeWidgetItem(m_fileList);
         listItem->setText(0, it.value().name);
@@ -1104,6 +1105,9 @@ void FlagBrowserWidget::setSidebarList(QTreeWidget* list) {
     m_tagList = list;
     Logger::instance().logInfo("FlagBrowserWidget", "Clearing m_tagList");
     m_tagList->clear();
+    m_tagList->setContextMenuPolicy(Qt::NoContextMenu);
+    m_tagList->setSelectionMode(QAbstractItemView::SingleSelection);
+    m_tagList->setSelectionBehavior(QAbstractItemView::SelectRows);
     Logger::instance().logInfo("FlagBrowserWidget", "Setting column count to 1");
     m_tagList->setColumnCount(1);
     Logger::instance().logInfo("FlagBrowserWidget", "Setting header hidden");
@@ -1463,12 +1467,10 @@ FlagManagerMainWidget::FlagManagerMainWidget(FlagManagerTool* tool, QWidget* par
     m_importBtn->setFixedSize(80, 28);
     m_exportBtn->setFixedSize(80, 28);
     m_exportAllBtn->setFixedSize(80, 28);
-    m_selectAllBtn->setFixedSize(80, 28);
     
     actionLayout->addWidget(m_importBtn);
     actionLayout->addWidget(m_exportBtn);
     actionLayout->addWidget(m_exportAllBtn);
-    actionLayout->addWidget(m_selectAllBtn);
     tabLayout->addWidget(m_actionContainer);
     m_actionContainer->hide();
     
@@ -1486,8 +1488,7 @@ FlagManagerMainWidget::FlagManagerMainWidget(FlagManagerTool* tool, QWidget* par
     connect(m_exportBtn, &QPushButton::clicked, m_converter, &FlagConverterWidget::onExportCurrent);
     connect(m_exportAllBtn, &QPushButton::clicked, m_converter, &FlagConverterWidget::onExportAll);
     
-    // 连接全选按钮和选择状态变化信号
-    connect(m_selectAllBtn, &QPushButton::clicked, this, &FlagManagerMainWidget::onSelectAllClicked);
+    // Keep selection state synced for host-managed select-all action
     connect(m_converter, &FlagConverterWidget::selectionChanged, this, &FlagManagerMainWidget::onSelectionChanged);
     
     m_stack->setCurrentIndex(0);
@@ -1551,7 +1552,6 @@ void FlagManagerMainWidget::updateTexts() {
     m_importBtn->setText(m_tool->getString("ImportFiles"));
     m_exportBtn->setText(m_tool->getString("Export"));
     m_exportAllBtn->setText(m_tool->getString("ExportAll"));
-    updateSelectAllButton(m_hasSelection);
     m_browser->updateTexts();
     m_converter->updateTexts();
 }
@@ -1583,11 +1583,7 @@ void FlagManagerMainWidget::onSelectionChanged(bool hasSelection) {
 }
 
 void FlagManagerMainWidget::updateSelectAllButton(bool hasSelection) {
-    if (hasSelection) {
-        m_selectAllBtn->setText(m_tool->getString("DeselectAll"));
-    } else {
-        m_selectAllBtn->setText(m_tool->getString("SelectAll"));
-    }
+    Q_UNUSED(hasSelection);
 }
 
 // --- FlagListWidget ---
@@ -1596,8 +1592,8 @@ FlagListWidget::FlagListWidget(FlagManagerTool* tool, QWidget* parent)
     : QWidget(parent), m_tool(tool) {
     QVBoxLayout* layout = new QVBoxLayout(this);
     layout->setContentsMargins(0, 0, 0, 0);
-    m_header = new QLabel("TAGs");
-    layout->addWidget(m_header);
+    m_header = new QLabel("TAGs", this);
+    m_header->hide();
     m_list = new QTreeWidget();
     m_list->setHeaderHidden(true);
     m_list->setIndentation(0);
@@ -1617,7 +1613,7 @@ void FlagListWidget::applyTheme() {
     m_header->setStyleSheet(QString("font-weight: bold; padding: 10px; color: %1;").arg(headerColor));
     m_list->setStyleSheet(QString(R"(
         QTreeWidget {
-            background-color: %1; border: none; color: %2; border-bottom-right-radius: 10px;
+            background-color: %1; border: none; color: %2; border-bottom-right-radius: 0px;
         }
         QTreeWidget::item {
             padding: 5px;
@@ -1640,6 +1636,10 @@ void FlagListWidget::updateTexts() {
         m_list->setHeaderHidden(false);
         m_list->setHeaderLabels({m_tool->getString("ColFlagName"), m_tool->getString("ColFileName")});
     } else m_list->setHeaderHidden(true);
+}
+
+QString FlagListWidget::currentTitle() const {
+    return m_currentMode == 0 ? m_tool->getString("Tags") : m_tool->getString("Files");
 }
 
 void FlagListWidget::setMode(int mode) {
@@ -1680,26 +1680,75 @@ QIcon FlagManagerTool::icon() const {
     return QIcon::fromTheme("flag");
 }
 void FlagManagerTool::initialize() { loadLanguage("English"); }
+
 QWidget* FlagManagerTool::createWidget(QWidget* parent) {
     m_mainWidget = new FlagManagerMainWidget(this, parent);
+    m_currentMode = 0;
+    m_searchModeActive = false;
     return m_mainWidget;
 }
+
 QWidget* FlagManagerTool::createSidebarWidget(QWidget* parent) {
     Logger::instance().logInfo("FlagManagerTool", "createSidebarWidget() called");
     m_listWidget = new FlagListWidget(this, parent);
+    m_listWidget->setMode(m_currentMode);
     Logger::instance().logInfo("FlagManagerTool", "FlagListWidget created");
     if (m_mainWidget) {
         Logger::instance().logInfo("FlagManagerTool", "m_mainWidget exists, calling setSidebarList...");
         m_mainWidget->getBrowser()->setSidebarList(m_listWidget->getList());
         Logger::instance().logInfo("FlagManagerTool", "setSidebarList completed, calling refreshData...");
         m_mainWidget->getBrowser()->refreshData();
+        if (m_currentMode == 1) {
+            m_mainWidget->getConverter()->setSidebarList(m_listWidget->getList());
+        }
         Logger::instance().logInfo("FlagManagerTool", "refreshData completed");
     } else {
         Logger::instance().logWarning("FlagManagerTool", "m_mainWidget is null!");
     }
     Logger::instance().logInfo("FlagManagerTool", "createSidebarWidget() returning");
+    emit rightSidebarStateChanged();
     return m_listWidget;
 }
+
+QList<ToolRightSidebarButtonDefinition> FlagManagerTool::rightSidebarButtons() const {
+    return {};
+}
+
+ToolRightSidebarState FlagManagerTool::rightSidebarState() const {
+    ToolRightSidebarState state;
+    state.title = m_listWidget ? m_listWidget->currentTitle() : (m_currentMode == 0 ? getString("Tags") : getString("Files"));
+    state.orderedButtonKeys = {QString::fromUtf8("__default__"), QString::fromUtf8("__search__")};
+    state.activeButtonKey = m_searchModeActive ? QString::fromUtf8("__search__") : QString::fromUtf8("__default__");
+    state.listVisible = true;
+    state.searchModeAvailable = true;
+    state.searchModeActive = m_searchModeActive;
+
+    if (m_currentMode == 1) {
+        state.searchableColumns = {0, 1};
+        state.searchableColumnLabels = {getString("ColFlagName"), getString("ColFileName")};
+        state.showSelectAllButton = true;
+    } else {
+        state.searchableColumns = {0};
+        state.searchableColumnLabels = {getString("Tags")};
+        state.showSelectAllButton = false;
+    }
+
+    return state;
+}
+
+QTreeWidget* FlagManagerTool::rightSidebarListWidget() const {
+    return m_listWidget ? m_listWidget->getList() : nullptr;
+}
+
+void FlagManagerTool::handleRightSidebarButton(const QString& key) {
+    if (key == QString::fromUtf8("__search__")) {
+        m_searchModeActive = !m_searchModeActive;
+    } else {
+        m_searchModeActive = false;
+    }
+    emit rightSidebarStateChanged();
+}
+
 void FlagManagerTool::loadLanguage(const QString& lang) {
     m_currentLang = lang;
     QDir appDir(QCoreApplication::applicationDirPath());
@@ -1714,15 +1763,26 @@ void FlagManagerTool::loadLanguage(const QString& lang) {
         if (m_listWidget) m_listWidget->updateTexts();
     }
 }
-QString FlagManagerTool::getString(const QString& key) { return m_localizedStrings.value(key).toString(key); }
+QString FlagManagerTool::getString(const QString& key) const { return m_localizedStrings.value(key).toString(key); }
+
 void FlagManagerTool::applyTheme() {
     if (m_mainWidget) m_mainWidget->applyTheme();
     if (m_listWidget) m_listWidget->applyTheme();
 }
+
 void FlagManagerTool::switchMode(int mode) {
+    m_currentMode = mode;
+    m_searchModeActive = false;
+
     if (m_listWidget) {
         m_listWidget->setMode(mode);
-        if (mode == 0 && m_mainWidget) m_mainWidget->getBrowser()->refreshData();
-        else if (mode == 1 && m_mainWidget) m_mainWidget->getConverter()->setSidebarList(m_listWidget->getList());
+        if (mode == 0 && m_mainWidget) {
+            m_mainWidget->getBrowser()->setSidebarList(m_listWidget->getList());
+            m_mainWidget->getBrowser()->refreshData();
+        } else if (mode == 1 && m_mainWidget) {
+            m_mainWidget->getConverter()->setSidebarList(m_listWidget->getList());
+        }
     }
+
+    emit rightSidebarStateChanged();
 }

@@ -221,6 +221,8 @@ public:
     FlagListWidget(FlagManagerTool* tool, QWidget* parent = nullptr);
     QTreeWidget* getList() const { return m_list; }
     void setMode(int mode);
+    int mode() const { return m_currentMode; }
+    QString currentTitle() const;
     void updateTexts();
     void applyTheme();
 
@@ -253,11 +255,18 @@ public:
     void initialize() override;
     QWidget* createWidget(QWidget* parent = nullptr) override;
     QWidget* createSidebarWidget(QWidget* parent = nullptr) override;
+    QList<ToolRightSidebarButtonDefinition> rightSidebarButtons() const override;
+    ToolRightSidebarState rightSidebarState() const override;
+    QTreeWidget* rightSidebarListWidget() const override;
+    void handleRightSidebarButton(const QString& key) override;
     void loadLanguage(const QString& lang) override;
     void applyTheme() override;
 
     void switchMode(int mode);
-    QString getString(const QString& key);
+    QString getString(const QString& key) const;
+
+signals:
+    void rightSidebarStateChanged();
 
 private:
     QMap<QString, QString> m_localizedNames;
@@ -273,6 +282,8 @@ private:
 
     FlagManagerMainWidget* m_mainWidget = nullptr;
     FlagListWidget* m_listWidget = nullptr;
+    int m_currentMode = 0;
+    bool m_searchModeActive = false;
 };
 
 #endif // FLAGMANAGERTOOL_H

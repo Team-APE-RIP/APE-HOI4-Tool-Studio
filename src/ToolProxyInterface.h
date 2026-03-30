@@ -14,6 +14,7 @@
 #include "ToolInterface.h"
 #include "ToolIpcProtocol.h"
 
+class QTreeWidget;
 class QVBoxLayout;
 
 // Container widget that embeds the tool's window from subprocess
@@ -74,6 +75,10 @@ public:
     void initialize() override;
     QWidget* createWidget(QWidget* parent = nullptr) override;
     QWidget* createSidebarWidget(QWidget* parent = nullptr) override;
+    QList<ToolRightSidebarButtonDefinition> rightSidebarButtons() const override { return {}; }
+    ToolRightSidebarState rightSidebarState() const override { return {}; }
+    QTreeWidget* rightSidebarListWidget() const override { return nullptr; }
+    void handleRightSidebarButton(const QString& key) override { Q_UNUSED(key); }
     void loadLanguage(const QString& lang) override;
     void applyTheme() override;
     
