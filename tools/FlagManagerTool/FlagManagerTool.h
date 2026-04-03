@@ -19,6 +19,7 @@
 #include <QButtonGroup>
 #include <QMenu>
 #include "../../src/ToolInterface.h"
+#include "../../src/ToolRuntimeContext.h"
 
 class FlagManagerTool;
 class FlagManagerMainWidget;
@@ -31,8 +32,13 @@ struct FlagVariant {
     bool hasLarge = false;
     bool hasMedium = false;
     bool hasSmall = false;
-    
+
     bool isComplete() const { return hasLarge && hasMedium && hasSmall; }
+};
+
+struct FlagFileRef {
+    ToolRuntimeContext::FileRoot root = ToolRuntimeContext::FileRoot::Unknown;
+    QString relativePath;
 };
 
 // --- Converter Widgets ---
@@ -129,8 +135,7 @@ private:
     QLabel *m_labelL, *m_labelT, *m_labelR, *m_labelB;
     QLineEdit* m_nameEdit;
     QLineEdit* m_cropLeft, *m_cropTop, *m_cropRight, *m_cropBottom;
-    
-    // 用于主题切换
+
     QWidget* m_previewContainer = nullptr;
     QWidget* m_controlPanel = nullptr;
 };
@@ -154,19 +159,19 @@ private slots:
 
 private:
     void updateFlagDisplay();
-    QImage loadTga(const QString& path);
+    QImage loadTga(const FlagFileRef& fileRef);
 
     FlagManagerTool* m_tool;
     QTreeWidget* m_tagList = nullptr;
     QWidget* m_scrollContent;
     QScrollArea* m_scrollArea;
     QLabel* m_placeholder;
-    
+
     int m_currentSizeIndex = 0; // 0=Large
-    
+
     QString m_selectedTag;
     QMap<QString, QList<FlagVariant>> m_tagMap; // TAG -> Variants
-    QMap<QString, QString> m_flagPaths; // "baseName_sizeIndex" -> absPath
+    QMap<QString, FlagFileRef> m_flagPaths; // "baseName_sizeIndex" -> runtime file reference
 };
 
 // --- Main Container ---
@@ -190,7 +195,7 @@ private:
     void updateButtonStyles(int activeIndex);
     void updateToolbarVisibility(int modeIndex);
     void updateSelectAllButton(bool hasSelection);
-    
+
     FlagManagerTool* m_tool;
     QStackedWidget* m_stack;
     FlagConverterWidget* m_converter;
@@ -198,13 +203,11 @@ private:
     QWidget* m_tabBar;
     QPushButton* m_browserBtn;
     QPushButton* m_converterBtn;
-    
-    // 管理模式的尺寸按钮
+
     QWidget* m_sizeContainer;
     QButtonGroup* m_sizeGroup;
     QPushButton* m_sizeBtns[3];
-    
-    // 新建模式的导入导出按钮
+
     QWidget* m_actionContainer;
     QPushButton* m_importBtn;
     QPushButton* m_exportBtn;
@@ -248,10 +251,10 @@ public:
     QString compatibleVersion() const override { return m_compatibleVersion; }
     QString author() const override { return m_author; }
     QStringList dependencies() const override { return m_dependencies; }
-    
+
     void setMetaData(const QJsonObject& metaData) override;
     QIcon icon() const override;
-    
+
     void initialize() override;
     QWidget* createWidget(QWidget* parent = nullptr) override;
     QWidget* createSidebarWidget(QWidget* parent = nullptr) override;
@@ -273,7 +276,7 @@ private:
     QMap<QString, QString> m_localizedDescs;
     QJsonObject m_localizedStrings;
     QString m_currentLang;
-    
+
     QString m_id;
     QString m_version;
     QString m_compatibleVersion;

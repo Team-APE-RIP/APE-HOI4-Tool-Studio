@@ -1,0 +1,42 @@
+//-------------------------------------------------------------------------------------
+// LoadingOverlay.h -- Part of APE HOI4 Tool Studio
+//
+// Copyright (C) 2026 Team APE:RIP. All rights reserved.
+// Licensed under the Team APE:RIP Source Code License Agreement.
+//
+// https://github.com/Team-APE-RIP/APE-HOI4-Tool-Studio/
+//-------------------------------------------------------------------------------------
+#ifndef LOADINGOVERLAY_H
+#define LOADINGOVERLAY_H
+
+#include <QWidget>
+#include <QLabel>
+#include <QProgressBar>
+#include <QVBoxLayout>
+
+class LoadingOverlay : public QWidget {
+    Q_OBJECT
+
+public:
+    explicit LoadingOverlay(QWidget *parent = nullptr);
+    
+    void setMessage(const QString& message);
+    void setProgress(int value); // 0-100, -1 for indeterminate
+    void showOverlay();
+    void hideOverlay();
+    void updateTheme();
+
+protected:
+    void paintEvent(QPaintEvent *event) override;
+    bool eventFilter(QObject *obj, QEvent *event) override;
+
+private:
+    void updatePosition();
+    
+    QWidget *m_container;
+    QLabel *m_iconLabel;
+    QLabel *m_messageLabel;
+    QProgressBar *m_progressBar;
+};
+
+#endif // LOADINGOVERLAY_H

@@ -1,4 +1,5 @@
 #include "LogManagerTool.h"
+#include "../../src/ToolRuntimeContext.h"
 
 #include <QButtonGroup>
 #include <QClipboard>
@@ -1155,33 +1156,50 @@ QList<LogFileRecord> LogManagerTool::discoverLogFiles(LogMode mode) const {
         return files;
     }
 
-    const QString gameDocs = getGameDocsPath();
-    const QString latestLogPath = gameDocs + "/logs/error.log";
+    const ToolRuntimeContext::DirectoryListResult logsResult =
+        ToolRuntimeContext::instance().listDirectory(ToolRuntimeContext::FileRoot::Doc, "logs", false);
 
-    if (QFile::exists(latestLogPath)) {
-        LogFileRecord latestRecord;
-        latestRecord.displayName = latestLogInternalName();
-        latestRecord.sourcePath = latestLogPath;
-        latestRecord.mode = mode;
-        latestRecord.isLatest = true;
-        latestRecord.isLoaded = false;
-        files.append(latestRecord);
+    if (logsResult.success) {
+        for (const ToolRuntimeContext::DirectoryEntry& entry : logsResult.entries) {
+            if (entry.isDirectory) {
+                continue;
+            }
+            if (entry.name.compare("error.log", Qt::CaseInsensitive) != 0) {
+                continue;
+            }
+
+            LogFileRecord latestRecord;
+            latestRecord.displayName = latestLogInternalName();
+            latestRecord.sourcePath = entry.relativePath;
+            latestRecord.mode = mode;
+            latestRecord.isLatest = true;
+            latestRecord.isLoaded = false;
+            files.append(latestRecord);
+            break;
+        }
     }
 
     QList<LogFileRecord> historyRecords;
-    const QString crashesDirPath = gameDocs + "/crashes";
-    QDir crashesDir(crashesDirPath);
-    if (crashesDir.exists()) {
-        const QFileInfoList crashDirs = crashesDir.entryInfoList(QDir::Dirs | QDir::NoDotAndDotDot, QDir::Name);
-        for (const QFileInfo& crashDirInfo : crashDirs) {
-            const QString logPath = crashDirInfo.absoluteFilePath() + "/logs/error.log";
-            if (!QFile::exists(logPath)) {
+    const ToolRuntimeContext::DirectoryListResult crashesResult =
+        ToolRuntimeContext::instance().listDirectory(ToolRuntimeContext::FileRoot::Doc, "crashes", false);
+
+    if (crashesResult.success) {
+        for (const ToolRuntimeContext::DirectoryEntry& entry : crashesResult.entries) {
+            if (!entry.isDirectory) {
+                continue;
+            }
+
+            const QString logRelativePath = entry.relativePath + "/logs/error.log";
+            const ToolRuntimeContext::TextReadResult probeResult =
+                ToolRuntimeContext::instance().readTextFile(ToolRuntimeContext::FileRoot::Doc, logRelativePath);
+
+            if (!probeResult.success) {
                 continue;
             }
 
             LogFileRecord record;
-            record.displayName = crashDirInfo.fileName();
-            record.sourcePath = logPath;
+            record.displayName = entry.name;
+            record.sourcePath = logRelativePath;
             record.mode = mode;
             record.isLatest = false;
             record.isLoaded = false;
@@ -1324,15 +1342,15 @@ void LogManagerTool::handleCompareCleared() {
 }
 
 QString LogManagerTool::readTextFile(const QString& path) const {
-    QFile file(path);
-    if (!file.open(QIODevice::ReadOnly | QIODevice::Text)) {
-        Logger::instance().logWarning("LogManagerTool", "Failed to open log file: " + path);
+    const ToolRuntimeContext::TextReadResult result =
+        ToolRuntimeContext::instance().readTextFile(ToolRuntimeContext::FileRoot::Doc, path);
+
+    if (!result.success) {
+        Logger::instance().logWarning("LogManagerTool", "Failed to read log file: " + path + " - " + result.errorMessage);
         return QString();
     }
 
-    QTextStream stream(&file);
-    stream.setEncoding(QStringConverter::Utf8);
-    return stream.readAll();
+    return result.content;
 }
 
 void LogManagerTool::beginLoading(const QString& message) {

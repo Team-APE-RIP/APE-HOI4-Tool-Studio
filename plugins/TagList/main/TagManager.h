@@ -25,7 +25,7 @@ signals:
 private:
     TagManager();
 
-    void parseFile(const QString& filePath, QMap<QString, QString>& tags);
+    void parseFileContent(const QString& relativePath, const QString& content, QMap<QString, QString>& tags);
     QString removeComments(const QString& content);
 
     QMap<QString, QString> m_tags;

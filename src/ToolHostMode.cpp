@@ -1,3 +1,11 @@
+//-------------------------------------------------------------------------------------
+// ToolHostMode.cpp -- Part of APE HOI4 Tool Studio
+//
+// Copyright (C) 2026 Team APE:RIP. All rights reserved.
+// Licensed under the Team APE:RIP Source Code License Agreement.
+//
+// https://github.com/Team-APE-RIP/APE-HOI4-Tool-Studio/
+//-------------------------------------------------------------------------------------
 #include "ToolHostMode.h"
 #include "ToolInterface.h"
 #include "ToolIpcProtocol.h"
@@ -17,10 +25,12 @@
 #include <QDebug>
 #include <QJsonDocument>
 #include <QJsonObject>
+#include <QJsonArray>
 #include <QFile>
 #include <QEventLoop>
 #include <QThread>
 #include <QElapsedTimer>
+#include <QDateTime>
 
 #ifdef Q_OS_WIN
 #include <windows.h>
@@ -84,6 +94,51 @@ public:
         ToolRuntimeContext::instance().setPluginBinaryPathResolver(
             [this](const QString& pluginName, QString* outPath, QString* errorMessage) {
                 return requestAuthorizedPluginBinaryPath(pluginName, outPath, errorMessage);
+            }
+        );
+        ToolRuntimeContext::instance().setBinaryFileReader(
+            [this](ToolRuntimeContext::FileRoot root, const QString& relativePath) {
+                return requestBinaryFile(root, relativePath);
+            }
+        );
+        ToolRuntimeContext::instance().setTextFileReader(
+            [this](ToolRuntimeContext::FileRoot root, const QString& relativePath) {
+                return requestTextFile(root, relativePath);
+            }
+        );
+        ToolRuntimeContext::instance().setEffectiveBinaryFileReader(
+            [this](const QString& relativePath) {
+                return requestEffectiveBinaryFile(relativePath);
+            }
+        );
+        ToolRuntimeContext::instance().setEffectiveTextFileReader(
+            [this](const QString& relativePath) {
+                return requestEffectiveTextFile(relativePath);
+            }
+        );
+        ToolRuntimeContext::instance().setBinaryFileWriter(
+            [this](ToolRuntimeContext::FileRoot root, const QString& relativePath, const QByteArray& content) {
+                return requestWriteBinaryFile(root, relativePath, content);
+            }
+        );
+        ToolRuntimeContext::instance().setTextFileWriter(
+            [this](ToolRuntimeContext::FileRoot root, const QString& relativePath, const QString& content) {
+                return requestWriteTextFile(root, relativePath, content);
+            }
+        );
+        ToolRuntimeContext::instance().setPathRemover(
+            [this](ToolRuntimeContext::FileRoot root, const QString& relativePath) {
+                return requestRemovePath(root, relativePath);
+            }
+        );
+        ToolRuntimeContext::instance().setDirectoryEnsurer(
+            [this](ToolRuntimeContext::FileRoot root, const QString& relativePath) {
+                return requestEnsureDirectory(root, relativePath);
+            }
+        );
+        ToolRuntimeContext::instance().setDirectoryLister(
+            [this](ToolRuntimeContext::FileRoot root, const QString& relativePath, bool recursive) {
+                return requestListDirectory(root, relativePath, recursive);
             }
         );
 
@@ -265,6 +320,15 @@ private:
         case ToolIpc::MessageType::ConfigResponse:
         case ToolIpc::MessageType::FileIndexResponse:
         case ToolIpc::MessageType::PluginBinaryPathResponse:
+        case ToolIpc::MessageType::ReadBinaryFileResponse:
+        case ToolIpc::MessageType::ReadTextFileResponse:
+        case ToolIpc::MessageType::ReadEffectiveBinaryFileResponse:
+        case ToolIpc::MessageType::ReadEffectiveTextFileResponse:
+        case ToolIpc::MessageType::WriteBinaryFileResponse:
+        case ToolIpc::MessageType::WriteTextFileResponse:
+        case ToolIpc::MessageType::RemovePathResponse:
+        case ToolIpc::MessageType::EnsureDirectoryResponse:
+        case ToolIpc::MessageType::ListDirectoryResponse:
             handleDataResponse(msg);
             break;
             
@@ -611,6 +675,322 @@ private:
         return true;
     }
 
+    ToolRuntimeContext::FileReadResult requestBinaryFile(ToolRuntimeContext::FileRoot root, const QString& relativePath) {
+        ToolRuntimeContext::FileReadResult result;
+        if (m_socket->state() != QLocalSocket::ConnectedState) {
+            result.errorMessage = "IPC socket is not connected.";
+            return result;
+        }
+
+        const quint32 requestId = ++m_requestId;
+        QJsonObject payload;
+        payload["root"] = ToolRuntimeContext::fileRootToString(root);
+        payload["relativePath"] = relativePath;
+
+        m_binaryReadRequestCompleted = false;
+        m_binaryReadRequestResult = ToolRuntimeContext::FileReadResult{};
+        m_binaryReadRequestId = requestId;
+
+        sendMessage(ToolIpc::MessageType::ReadBinaryFile, payload, requestId);
+
+        QElapsedTimer timer;
+        timer.start();
+        while (!m_binaryReadRequestCompleted && timer.elapsed() < 5000) {
+            QCoreApplication::processEvents(QEventLoop::AllEvents, 20);
+            QThread::msleep(10);
+        }
+
+        if (!m_binaryReadRequestCompleted) {
+            m_binaryReadRequestId = 0;
+            result.errorMessage = QString("Timed out while reading binary file: %1").arg(relativePath);
+            return result;
+        }
+
+        m_binaryReadRequestId = 0;
+        return m_binaryReadRequestResult;
+    }
+
+    ToolRuntimeContext::TextReadResult requestTextFile(ToolRuntimeContext::FileRoot root, const QString& relativePath) {
+        ToolRuntimeContext::TextReadResult result;
+        if (m_socket->state() != QLocalSocket::ConnectedState) {
+            result.errorMessage = "IPC socket is not connected.";
+            return result;
+        }
+
+        const quint32 requestId = ++m_requestId;
+        QJsonObject payload;
+        payload["root"] = ToolRuntimeContext::fileRootToString(root);
+        payload["relativePath"] = relativePath;
+
+        m_textReadRequestCompleted = false;
+        m_textReadRequestResult = ToolRuntimeContext::TextReadResult{};
+        m_textReadRequestId = requestId;
+
+        sendMessage(ToolIpc::MessageType::ReadTextFile, payload, requestId);
+
+        QElapsedTimer timer;
+        timer.start();
+        while (!m_textReadRequestCompleted && timer.elapsed() < 5000) {
+            QCoreApplication::processEvents(QEventLoop::AllEvents, 20);
+            QThread::msleep(10);
+        }
+
+        if (!m_textReadRequestCompleted) {
+            m_textReadRequestId = 0;
+            result.errorMessage = QString("Timed out while reading text file: %1").arg(relativePath);
+            return result;
+        }
+
+        m_textReadRequestId = 0;
+        return m_textReadRequestResult;
+    }
+
+    ToolRuntimeContext::FileReadResult requestEffectiveBinaryFile(const QString& relativePath) {
+        ToolRuntimeContext::FileReadResult result;
+        if (m_socket->state() != QLocalSocket::ConnectedState) {
+            result.errorMessage = "IPC socket is not connected.";
+            return result;
+        }
+
+        const quint32 requestId = ++m_requestId;
+        QJsonObject payload;
+        payload["relativePath"] = relativePath;
+
+        m_effectiveBinaryReadRequestCompleted = false;
+        m_effectiveBinaryReadRequestResult = ToolRuntimeContext::FileReadResult{};
+        m_effectiveBinaryReadRequestId = requestId;
+
+        sendMessage(ToolIpc::MessageType::ReadEffectiveBinaryFile, payload, requestId);
+
+        QElapsedTimer timer;
+        timer.start();
+        while (!m_effectiveBinaryReadRequestCompleted && timer.elapsed() < 5000) {
+            QCoreApplication::processEvents(QEventLoop::AllEvents, 20);
+            QThread::msleep(10);
+        }
+
+        if (!m_effectiveBinaryReadRequestCompleted) {
+            m_effectiveBinaryReadRequestId = 0;
+            result.errorMessage = QString("Timed out while reading effective binary file: %1").arg(relativePath);
+            return result;
+        }
+
+        m_effectiveBinaryReadRequestId = 0;
+        return m_effectiveBinaryReadRequestResult;
+    }
+
+    ToolRuntimeContext::TextReadResult requestEffectiveTextFile(const QString& relativePath) {
+        ToolRuntimeContext::TextReadResult result;
+        if (m_socket->state() != QLocalSocket::ConnectedState) {
+            result.errorMessage = "IPC socket is not connected.";
+            return result;
+        }
+
+        const quint32 requestId = ++m_requestId;
+        QJsonObject payload;
+        payload["relativePath"] = relativePath;
+
+        m_effectiveTextReadRequestCompleted = false;
+        m_effectiveTextReadRequestResult = ToolRuntimeContext::TextReadResult{};
+        m_effectiveTextReadRequestId = requestId;
+
+        sendMessage(ToolIpc::MessageType::ReadEffectiveTextFile, payload, requestId);
+
+        QElapsedTimer timer;
+        timer.start();
+        while (!m_effectiveTextReadRequestCompleted && timer.elapsed() < 5000) {
+            QCoreApplication::processEvents(QEventLoop::AllEvents, 20);
+            QThread::msleep(10);
+        }
+
+        if (!m_effectiveTextReadRequestCompleted) {
+            m_effectiveTextReadRequestId = 0;
+            result.errorMessage = QString("Timed out while reading effective text file: %1").arg(relativePath);
+            return result;
+        }
+
+        m_effectiveTextReadRequestId = 0;
+        return m_effectiveTextReadRequestResult;
+    }
+
+    ToolRuntimeContext::FileWriteResult requestWriteBinaryFile(ToolRuntimeContext::FileRoot root, const QString& relativePath, const QByteArray& content) {
+        ToolRuntimeContext::FileWriteResult result;
+        if (m_socket->state() != QLocalSocket::ConnectedState) {
+            result.errorMessage = "IPC socket is not connected.";
+            return result;
+        }
+
+        const quint32 requestId = ++m_requestId;
+        QJsonObject payload;
+        payload["root"] = ToolRuntimeContext::fileRootToString(root);
+        payload["relativePath"] = relativePath;
+        payload["contentBase64"] = QString::fromLatin1(content.toBase64());
+
+        m_writeRequestCompleted = false;
+        m_writeRequestResult = ToolRuntimeContext::FileWriteResult{};
+        m_writeRequestId = requestId;
+
+        sendMessage(ToolIpc::MessageType::WriteBinaryFile, payload, requestId);
+
+        QElapsedTimer timer;
+        timer.start();
+        while (!m_writeRequestCompleted && timer.elapsed() < 5000) {
+            QCoreApplication::processEvents(QEventLoop::AllEvents, 20);
+            QThread::msleep(10);
+        }
+
+        if (!m_writeRequestCompleted) {
+            m_writeRequestId = 0;
+            result.errorMessage = QString("Timed out while writing binary file: %1").arg(relativePath);
+            return result;
+        }
+
+        m_writeRequestId = 0;
+        return m_writeRequestResult;
+    }
+
+    ToolRuntimeContext::FileWriteResult requestWriteTextFile(ToolRuntimeContext::FileRoot root, const QString& relativePath, const QString& content) {
+        ToolRuntimeContext::FileWriteResult result;
+        if (m_socket->state() != QLocalSocket::ConnectedState) {
+            result.errorMessage = "IPC socket is not connected.";
+            return result;
+        }
+
+        const quint32 requestId = ++m_requestId;
+        QJsonObject payload;
+        payload["root"] = ToolRuntimeContext::fileRootToString(root);
+        payload["relativePath"] = relativePath;
+        payload["content"] = content;
+
+        m_writeRequestCompleted = false;
+        m_writeRequestResult = ToolRuntimeContext::FileWriteResult{};
+        m_writeRequestId = requestId;
+
+        sendMessage(ToolIpc::MessageType::WriteTextFile, payload, requestId);
+
+        QElapsedTimer timer;
+        timer.start();
+        while (!m_writeRequestCompleted && timer.elapsed() < 5000) {
+            QCoreApplication::processEvents(QEventLoop::AllEvents, 20);
+            QThread::msleep(10);
+        }
+
+        if (!m_writeRequestCompleted) {
+            m_writeRequestId = 0;
+            result.errorMessage = QString("Timed out while writing text file: %1").arg(relativePath);
+            return result;
+        }
+
+        m_writeRequestId = 0;
+        return m_writeRequestResult;
+    }
+
+    ToolRuntimeContext::FileWriteResult requestRemovePath(ToolRuntimeContext::FileRoot root, const QString& relativePath) {
+        ToolRuntimeContext::FileWriteResult result;
+        if (m_socket->state() != QLocalSocket::ConnectedState) {
+            result.errorMessage = "IPC socket is not connected.";
+            return result;
+        }
+
+        const quint32 requestId = ++m_requestId;
+        QJsonObject payload;
+        payload["root"] = ToolRuntimeContext::fileRootToString(root);
+        payload["relativePath"] = relativePath;
+
+        m_writeRequestCompleted = false;
+        m_writeRequestResult = ToolRuntimeContext::FileWriteResult{};
+        m_writeRequestId = requestId;
+
+        sendMessage(ToolIpc::MessageType::RemovePath, payload, requestId);
+
+        QElapsedTimer timer;
+        timer.start();
+        while (!m_writeRequestCompleted && timer.elapsed() < 5000) {
+            QCoreApplication::processEvents(QEventLoop::AllEvents, 20);
+            QThread::msleep(10);
+        }
+
+        if (!m_writeRequestCompleted) {
+            m_writeRequestId = 0;
+            result.errorMessage = QString("Timed out while removing path: %1").arg(relativePath);
+            return result;
+        }
+
+        m_writeRequestId = 0;
+        return m_writeRequestResult;
+    }
+
+    ToolRuntimeContext::FileWriteResult requestEnsureDirectory(ToolRuntimeContext::FileRoot root, const QString& relativePath) {
+        ToolRuntimeContext::FileWriteResult result;
+        if (m_socket->state() != QLocalSocket::ConnectedState) {
+            result.errorMessage = "IPC socket is not connected.";
+            return result;
+        }
+
+        const quint32 requestId = ++m_requestId;
+        QJsonObject payload;
+        payload["root"] = ToolRuntimeContext::fileRootToString(root);
+        payload["relativePath"] = relativePath;
+
+        m_writeRequestCompleted = false;
+        m_writeRequestResult = ToolRuntimeContext::FileWriteResult{};
+        m_writeRequestId = requestId;
+
+        sendMessage(ToolIpc::MessageType::EnsureDirectory, payload, requestId);
+
+        QElapsedTimer timer;
+        timer.start();
+        while (!m_writeRequestCompleted && timer.elapsed() < 5000) {
+            QCoreApplication::processEvents(QEventLoop::AllEvents, 20);
+            QThread::msleep(10);
+        }
+
+        if (!m_writeRequestCompleted) {
+            m_writeRequestId = 0;
+            result.errorMessage = QString("Timed out while ensuring directory: %1").arg(relativePath);
+            return result;
+        }
+
+        m_writeRequestId = 0;
+        return m_writeRequestResult;
+    }
+
+    ToolRuntimeContext::DirectoryListResult requestListDirectory(ToolRuntimeContext::FileRoot root, const QString& relativePath, bool recursive) {
+        ToolRuntimeContext::DirectoryListResult result;
+        if (m_socket->state() != QLocalSocket::ConnectedState) {
+            result.errorMessage = "IPC socket is not connected.";
+            return result;
+        }
+
+        const quint32 requestId = ++m_requestId;
+        QJsonObject payload;
+        payload["root"] = ToolRuntimeContext::fileRootToString(root);
+        payload["relativePath"] = relativePath;
+        payload["recursive"] = recursive;
+
+        m_directoryListRequestCompleted = false;
+        m_directoryListRequestResult = ToolRuntimeContext::DirectoryListResult{};
+        m_directoryListRequestId = requestId;
+
+        sendMessage(ToolIpc::MessageType::ListDirectory, payload, requestId);
+
+        QElapsedTimer timer;
+        timer.start();
+        while (!m_directoryListRequestCompleted && timer.elapsed() < 5000) {
+            QCoreApplication::processEvents(QEventLoop::AllEvents, 20);
+            QThread::msleep(10);
+        }
+
+        if (!m_directoryListRequestCompleted) {
+            m_directoryListRequestId = 0;
+            result.errorMessage = QString("Timed out while listing directory: %1").arg(relativePath);
+            return result;
+        }
+
+        m_directoryListRequestId = 0;
+        return m_directoryListRequestResult;
+    }
+
     void handleDataResponse(const ToolIpc::Message& msg) {
         switch (msg.type) {
         case ToolIpc::MessageType::ConfigResponse:
@@ -618,7 +998,7 @@ private:
             qDebug() << "Received config data from main process";
             m_configReceived = true;
             break;
-            
+
         case ToolIpc::MessageType::FileIndexResponse:
             FileManager::instance().setFromJson(msg.payload);
             qDebug() << "Received file index data from main process";
@@ -633,11 +1013,84 @@ private:
                 m_pluginPathRequestError = msg.payload.value("error").toString();
             }
             break;
-            
+
+        case ToolIpc::MessageType::ReadBinaryFileResponse:
+            if (msg.requestId == m_binaryReadRequestId) {
+                m_binaryReadRequestCompleted = true;
+                m_binaryReadRequestResult.success = msg.payload.value("success").toBool();
+                m_binaryReadRequestResult.errorMessage = msg.payload.value("error").toString();
+                m_binaryReadRequestResult.content =
+                    QByteArray::fromBase64(msg.payload.value("contentBase64").toString().toLatin1());
+            }
+            break;
+
+        case ToolIpc::MessageType::ReadTextFileResponse:
+            if (msg.requestId == m_textReadRequestId) {
+                m_textReadRequestCompleted = true;
+                m_textReadRequestResult.success = msg.payload.value("success").toBool();
+                m_textReadRequestResult.errorMessage = msg.payload.value("error").toString();
+                m_textReadRequestResult.content = msg.payload.value("content").toString();
+            }
+            break;
+
+        case ToolIpc::MessageType::ReadEffectiveBinaryFileResponse:
+            if (msg.requestId == m_effectiveBinaryReadRequestId) {
+                m_effectiveBinaryReadRequestCompleted = true;
+                m_effectiveBinaryReadRequestResult.success = msg.payload.value("success").toBool();
+                m_effectiveBinaryReadRequestResult.errorMessage = msg.payload.value("error").toString();
+                m_effectiveBinaryReadRequestResult.content =
+                    QByteArray::fromBase64(msg.payload.value("contentBase64").toString().toLatin1());
+            }
+            break;
+
+        case ToolIpc::MessageType::ReadEffectiveTextFileResponse:
+            if (msg.requestId == m_effectiveTextReadRequestId) {
+                m_effectiveTextReadRequestCompleted = true;
+                m_effectiveTextReadRequestResult.success = msg.payload.value("success").toBool();
+                m_effectiveTextReadRequestResult.errorMessage = msg.payload.value("error").toString();
+                m_effectiveTextReadRequestResult.content = msg.payload.value("content").toString();
+            }
+            break;
+
+        case ToolIpc::MessageType::WriteBinaryFileResponse:
+        case ToolIpc::MessageType::WriteTextFileResponse:
+        case ToolIpc::MessageType::RemovePathResponse:
+        case ToolIpc::MessageType::EnsureDirectoryResponse:
+            if (msg.requestId == m_writeRequestId) {
+                m_writeRequestCompleted = true;
+                m_writeRequestResult.success = msg.payload.value("success").toBool();
+                m_writeRequestResult.errorMessage = msg.payload.value("error").toString();
+            }
+            break;
+
+        case ToolIpc::MessageType::ListDirectoryResponse:
+            if (msg.requestId == m_directoryListRequestId) {
+                m_directoryListRequestCompleted = true;
+                m_directoryListRequestResult.success = msg.payload.value("success").toBool();
+                m_directoryListRequestResult.errorMessage = msg.payload.value("error").toString();
+                m_directoryListRequestResult.entries.clear();
+
+                const QJsonArray entries = msg.payload.value("entries").toArray();
+                for (const QJsonValue& value : entries) {
+                    const QJsonObject object = value.toObject();
+                    ToolRuntimeContext::DirectoryEntry entry;
+                    entry.relativePath = object.value("relativePath").toString();
+                    entry.name = object.value("name").toString();
+                    entry.isDirectory = object.value("isDirectory").toBool();
+                    entry.size = static_cast<qint64>(object.value("size").toDouble(-1));
+                    entry.lastModifiedUtc = QDateTime::fromString(
+                        object.value("lastModifiedUtc").toString(),
+                        Qt::ISODateWithMs
+                    );
+                    m_directoryListRequestResult.entries.append(entry);
+                }
+            }
+            break;
+
         default:
             break;
         }
-        
+
         if (m_configReceived && m_fileIndexReceived) {
             m_dataReady = true;
             if (m_dataWaitLoop) {
@@ -724,6 +1177,31 @@ private:
     quint32 m_pluginPathRequestRequestId = 0;
     QString m_pluginPathRequestPath;
     QString m_pluginPathRequestError;
+
+    bool m_binaryReadRequestCompleted = false;
+    quint32 m_binaryReadRequestId = 0;
+    ToolRuntimeContext::FileReadResult m_binaryReadRequestResult;
+
+    bool m_textReadRequestCompleted = false;
+    quint32 m_textReadRequestId = 0;
+    ToolRuntimeContext::TextReadResult m_textReadRequestResult;
+
+    bool m_effectiveBinaryReadRequestCompleted = false;
+    quint32 m_effectiveBinaryReadRequestId = 0;
+    ToolRuntimeContext::FileReadResult m_effectiveBinaryReadRequestResult;
+
+    bool m_effectiveTextReadRequestCompleted = false;
+    quint32 m_effectiveTextReadRequestId = 0;
+    ToolRuntimeContext::TextReadResult m_effectiveTextReadRequestResult;
+
+    bool m_writeRequestCompleted = false;
+    quint32 m_writeRequestId = 0;
+    ToolRuntimeContext::FileWriteResult m_writeRequestResult;
+
+    bool m_directoryListRequestCompleted = false;
+    quint32 m_directoryListRequestId = 0;
+    ToolRuntimeContext::DirectoryListResult m_directoryListRequestResult;
+
     QEventLoop* m_dataWaitLoop = nullptr;
 };
 

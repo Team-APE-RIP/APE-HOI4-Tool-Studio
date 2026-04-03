@@ -1,8 +1,8 @@
 #include "TagManager.h"
 #include "../../../src/FileManager.h"
 #include "../../../src/Logger.h"
+#include "../../../src/PluginRuntimeContext.h"
 
-#include <QFile>
 #include <QRegularExpression>
 
 TagManager::TagManager() {}
@@ -45,9 +45,22 @@ void TagManager::scanTags() {
         QString normalizedRelPath = it.key();
         normalizedRelPath.replace("\\", "/");
 
-        if (normalizedRelPath.startsWith("common/country_tags/") && normalizedRelPath.endsWith(".txt")) {
-            parseFile(it.value().absPath, newTags);
+        if (!normalizedRelPath.startsWith("common/country_tags/") || !normalizedRelPath.endsWith(".txt")) {
+            continue;
         }
+
+        const PluginRuntimeContext::TextReadResult readResult =
+            PluginRuntimeContext::instance().readEffectiveTextFile(normalizedRelPath);
+
+        if (!readResult.success) {
+            Logger::instance().logError(
+                "TagListPlugin",
+                QString("Failed to read effective tag file %1: %2").arg(normalizedRelPath, readResult.errorMessage)
+            );
+            continue;
+        }
+
+        parseFileContent(normalizedRelPath, readResult.content, newTags);
     }
 
     {
@@ -89,19 +102,12 @@ QString TagManager::removeComments(const QString& content) {
     return result;
 }
 
-void TagManager::parseFile(const QString& filePath, QMap<QString, QString>& tags) {
-    QFile file(filePath);
-    if (!file.open(QIODevice::ReadOnly | QIODevice::Text)) {
-        Logger::instance().logError("TagListPlugin", "Failed to open file: " + filePath);
-        return;
-    }
-
-    const QString content = QString::fromUtf8(file.readAll());
+void TagManager::parseFileContent(const QString& relativePath, const QString& content, QMap<QString, QString>& tags) {
     const QString cleanContent = removeComments(content);
 
     static QRegularExpression dynamicRe("dynamic_tags\\s*=\\s*yes", QRegularExpression::CaseInsensitiveOption);
     if (dynamicRe.match(cleanContent).hasMatch()) {
-        Logger::instance().logInfo("TagListPlugin", "Skipping dynamic tags file: " + filePath);
+        Logger::instance().logInfo("TagListPlugin", "Skipping dynamic tags file: " + relativePath);
         return;
     }
 
@@ -115,7 +121,7 @@ void TagManager::parseFile(const QString& filePath, QMap<QString, QString>& tags
         if (!tags.contains(tag)) {
             tags.insert(tag, path);
         } else {
-            Logger::instance().logWarning("TagListPlugin", "Duplicate tag definition found: " + tag + " in " + filePath);
+            Logger::instance().logWarning("TagListPlugin", "Duplicate tag definition found: " + tag + " in " + relativePath);
         }
     }
 }

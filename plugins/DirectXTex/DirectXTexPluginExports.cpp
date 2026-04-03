@@ -13,15 +13,19 @@
 namespace {
 QByteArray g_errorBuffer;
 
-bool loadImageFromDDS(const QString& path, QImage& outImage) {
-    const std::wstring wpath = path.toStdWString();
-
+bool loadImageFromDDS(const QByteArray& data, QImage& outImage) {
     DirectX::TexMetadata metadata;
     DirectX::ScratchImage scratchImage;
 
-    HRESULT hr = DirectX::LoadFromDDSFile(wpath.c_str(), DirectX::DDS_FLAGS_NONE, &metadata, scratchImage);
+    HRESULT hr = DirectX::LoadFromDDSMemory(
+        reinterpret_cast<const uint8_t*>(data.constData()),
+        static_cast<size_t>(data.size()),
+        DirectX::DDS_FLAGS_NONE,
+        &metadata,
+        scratchImage
+    );
     if (FAILED(hr)) {
-        g_errorBuffer = QByteArray("Failed to load DDS file.");
+        g_errorBuffer = QByteArray("Failed to load DDS image from memory.");
         return false;
     }
 
@@ -72,14 +76,14 @@ bool loadImageFromDDS(const QString& path, QImage& outImage) {
 }
 }
 
-APE_PLUGIN_EXPORT int APE_DirectXTex_LoadDDSImage(const wchar_t* path, unsigned char** outBytes, int* outWidth, int* outHeight, int* outStride) {
-    if (!path || !outBytes || !outWidth || !outHeight || !outStride) {
+APE_PLUGIN_EXPORT int APE_DirectXTex_LoadDDSImage(const unsigned char* data, int size, unsigned char** outBytes, int* outWidth, int* outHeight, int* outStride) {
+    if (!data || size <= 0 || !outBytes || !outWidth || !outHeight || !outStride) {
         g_errorBuffer = QByteArray("Invalid DirectXTex arguments.");
         return 0;
     }
 
     QImage image;
-    if (!loadImageFromDDS(QString::fromWCharArray(path), image)) {
+    if (!loadImageFromDDS(QByteArray(reinterpret_cast<const char*>(data), size), image)) {
         return 0;
     }
 

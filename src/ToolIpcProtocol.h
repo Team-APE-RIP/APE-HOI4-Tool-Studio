@@ -1,3 +1,11 @@
+//-------------------------------------------------------------------------------------
+// ToolIpcProtocol.h -- Part of APE HOI4 Tool Studio
+//
+// Copyright (C) 2026 Team APE:RIP. All rights reserved.
+// Licensed under the Team APE:RIP Source Code License Agreement.
+//
+// https://github.com/Team-APE-RIP/APE-HOI4-Tool-Studio/
+//-------------------------------------------------------------------------------------
 #ifndef TOOLIPCPROTOCOL_H
 #define TOOLIPCPROTOCOL_H
 
@@ -43,11 +51,29 @@ enum class MessageType : quint32 {
     FileIndexResponse = 43,
     GetPluginBinaryPath = 44,
     PluginBinaryPathResponse = 45,
+    ReadBinaryFile = 46,
+    ReadBinaryFileResponse = 47,
+    ReadTextFile = 48,
+    ReadTextFileResponse = 49,
+    ReadEffectiveBinaryFile = 50,
+    ReadEffectiveBinaryFileResponse = 51,
+    ReadEffectiveTextFile = 52,
+    ReadEffectiveTextFileResponse = 53,
+    WriteBinaryFile = 54,
+    WriteBinaryFileResponse = 55,
+    WriteTextFile = 56,
+    WriteTextFileResponse = 57,
+    RemovePath = 58,
+    RemovePathResponse = 59,
+    EnsureDirectory = 60,
+    EnsureDirectoryResponse = 61,
+    ListDirectory = 62,
+    ListDirectoryResponse = 63,
     
     // Data notifications (Host -> Tool)
-    ConfigChanged = 50,
-    FileIndexChanged = 51,
-    ThemeChanged = 52,
+    ConfigChanged = 70,
+    FileIndexChanged = 71,
+    ThemeChanged = 72,
     
     // Error
     Error = 100,

@@ -22,6 +22,7 @@
 #include <QFileInfo>
 #include <QImageReader>
 #include <QLibrary>
+#include <vector>
 #include "../../src/FileManager.h"
 #include "../../src/ConfigManager.h"
 #include "../../src/Logger.h"
@@ -39,10 +40,27 @@
 #endif
 
 namespace {
-using TagListGetTagsJsonFn = const char* (*)();
+using APEHOI4ParserGetCountryTagEntryCountFn = uint32_t (*)(uint32_t);
+using APEHOI4ParserCopyCountryTagEntriesFn = uint32_t (*)(void*, uint32_t, uint32_t);
+
+struct APEHOI4ParserSourceRangeBridge {
+    uint32_t startOffset;
+    uint32_t endOffset;
+    uint32_t startLine;
+    uint32_t startColumn;
+    uint32_t endLine;
+    uint32_t endColumn;
+};
+
+struct APEHOI4ParserTagEntryBridge {
+    const char* tagUtf8;
+    const char* targetPathUtf8;
+    uint32_t isDynamic;
+    APEHOI4ParserSourceRangeBridge range;
+};
 
 #ifdef Q_OS_WIN
-using DirectXTexLoadDDSFn = int (*)(const wchar_t*, unsigned char**, int*, int*, int*);
+using DirectXTexLoadDDSFn = int (*)(const unsigned char*, int, unsigned char**, int*, int*, int*);
 using DirectXTexFreeImageFn = void (*)(unsigned char*);
 using DirectXTexGetLastErrorFn = const char* (*)();
 #endif
@@ -64,42 +82,209 @@ QString findPluginBinaryPath(const QString& pluginName) {
 QMap<QString, QString> loadTagsFromPluginRuntime() {
     QMap<QString, QString> tags;
 
-    const QString libraryPath = findPluginBinaryPath("TagList");
+    const QString libraryPath = findPluginBinaryPath("APEHOI4Parser");
     if (libraryPath.isEmpty()) {
-        Logger::instance().logWarning("FlagManagerTool", "TagList plugin binary not found.");
+        Logger::instance().logWarning("FlagManagerTool", "APEHOI4Parser plugin binary not found.");
         return tags;
     }
 
     QLibrary library(libraryPath);
     if (!library.load()) {
-        Logger::instance().logWarning("FlagManagerTool", "Failed to load TagList plugin: " + library.errorString());
+        Logger::instance().logWarning("FlagManagerTool", "Failed to load APEHOI4Parser plugin: " + library.errorString());
         return tags;
     }
 
-    auto getTagsJson = reinterpret_cast<TagListGetTagsJsonFn>(library.resolve("APE_TagList_GetTagsJson"));
-    if (!getTagsJson) {
-        Logger::instance().logWarning("FlagManagerTool", "Failed to resolve APE_TagList_GetTagsJson.");
+    auto getEntryCount = reinterpret_cast<APEHOI4ParserGetCountryTagEntryCountFn>(
+        library.resolve("APE_HOI4Parser_GetCountryTagEntryCount")
+    );
+    auto copyEntries = reinterpret_cast<APEHOI4ParserCopyCountryTagEntriesFn>(
+        library.resolve("APE_HOI4Parser_CopyCountryTagEntries")
+    );
+
+    if (!getEntryCount || !copyEntries) {
+        Logger::instance().logWarning(
+            "FlagManagerTool",
+            "Failed to resolve APE_HOI4Parser country tag ABI exports."
+        );
         return tags;
     }
 
-    const QByteArray jsonData(getTagsJson());
-    const QJsonDocument document = QJsonDocument::fromJson(jsonData);
-    if (!document.isObject()) {
-        Logger::instance().logWarning("FlagManagerTool", "TagList plugin returned invalid JSON.");
+    const uint32_t queryFlags = 0;
+    const uint32_t entryCount = getEntryCount(queryFlags);
+    if (entryCount == 0) {
         return tags;
     }
 
-    const QJsonObject object = document.object();
-    for (auto it = object.begin(); it != object.end(); ++it) {
-        tags.insert(it.key(), it.value().toString());
+    std::vector<APEHOI4ParserTagEntryBridge> entries(static_cast<size_t>(entryCount));
+    const uint32_t copiedCount = copyEntries(entries.data(), entryCount, queryFlags);
+
+    for (uint32_t i = 0; i < copiedCount; ++i) {
+        const APEHOI4ParserTagEntryBridge& entry = entries[static_cast<size_t>(i)];
+        if (entry.tagUtf8 == nullptr || entry.targetPathUtf8 == nullptr) {
+            continue;
+        }
+        if (entry.isDynamic != 0) {
+            continue;
+        }
+
+        tags.insert(
+            QString::fromUtf8(entry.tagUtf8),
+            QString::fromUtf8(entry.targetPathUtf8)
+        );
     }
 
     return tags;
 }
 
+static QImage loadTgaFromData(const QByteArray& data) {
+    if (data.size() < 18) {
+        return QImage();
+    }
+
+    const uchar* ptr = reinterpret_cast<const uchar*>(data.constData());
+
+    const int idLength = ptr[0];
+    const int colorMapType = ptr[1];
+    const int imageType = ptr[2];
+    const int width = ptr[12] | (ptr[13] << 8);
+    const int height = ptr[14] | (ptr[15] << 8);
+    const int bpp = ptr[16];
+    const int descriptor = ptr[17];
+
+    if (colorMapType != 0 || (imageType != 2 && imageType != 10)) {
+        return QImage::fromData(data);
+    }
+
+    if (bpp != 24 && bpp != 32 || width <= 0 || height <= 0) {
+        return QImage();
+    }
+
+    const int bytesPerPixel = bpp / 8;
+    const int pixelDataOffset = 18 + idLength;
+
+    if (data.size() < pixelDataOffset) {
+        return QImage();
+    }
+
+    QImage image(width, height, bpp == 32 ? QImage::Format_ARGB32 : QImage::Format_RGB32);
+
+    const uchar* pixelData = ptr + pixelDataOffset;
+    const int pixelCount = width * height;
+
+    if (imageType == 2) {
+        for (int y = 0; y < height; ++y) {
+            const int destY = (descriptor & 0x20) ? y : (height - 1 - y);
+            for (int x = 0; x < width; ++x) {
+                const int srcIdx = (y * width + x) * bytesPerPixel;
+                if (pixelDataOffset + srcIdx + bytesPerPixel > data.size()) {
+                    break;
+                }
+
+                const uchar b = pixelData[srcIdx];
+                const uchar g = pixelData[srcIdx + 1];
+                const uchar r = pixelData[srcIdx + 2];
+                const uchar a = (bytesPerPixel == 4) ? pixelData[srcIdx + 3] : 255;
+
+                image.setPixel(x, destY, qRgba(r, g, b, a));
+            }
+        }
+    } else {
+        int currentPixel = 0;
+        int dataIdx = 0;
+        const int maxDataSize = data.size() - pixelDataOffset;
+
+        while (currentPixel < pixelCount && dataIdx < maxDataSize) {
+            const uchar header = pixelData[dataIdx++];
+            const int count = (header & 0x7F) + 1;
+
+            if (header & 0x80) {
+                if (dataIdx + bytesPerPixel > maxDataSize) {
+                    break;
+                }
+
+                const uchar b = pixelData[dataIdx];
+                const uchar g = pixelData[dataIdx + 1];
+                const uchar r = pixelData[dataIdx + 2];
+                const uchar a = (bytesPerPixel == 4) ? pixelData[dataIdx + 3] : 255;
+                dataIdx += bytesPerPixel;
+
+                for (int i = 0; i < count && currentPixel < pixelCount; ++i, ++currentPixel) {
+                    const int x = currentPixel % width;
+                    const int y = currentPixel / width;
+                    const int destY = (descriptor & 0x20) ? y : (height - 1 - y);
+                    image.setPixel(x, destY, qRgba(r, g, b, a));
+                }
+            } else {
+                for (int i = 0; i < count && currentPixel < pixelCount; ++i, ++currentPixel) {
+                    if (dataIdx + bytesPerPixel > maxDataSize) {
+                        break;
+                    }
+
+                    const uchar b = pixelData[dataIdx];
+                    const uchar g = pixelData[dataIdx + 1];
+                    const uchar r = pixelData[dataIdx + 2];
+                    const uchar a = (bytesPerPixel == 4) ? pixelData[dataIdx + 3] : 255;
+                    dataIdx += bytesPerPixel;
+
+                    const int x = currentPixel % width;
+                    const int y = currentPixel / width;
+                    const int destY = (descriptor & 0x20) ? y : (height - 1 - y);
+                    image.setPixel(x, destY, qRgba(r, g, b, a));
+                }
+            }
+        }
+    }
+
+    return image;
+}
+
+static QByteArray saveTga32ToBytes(const QImage& img) {
+    QByteArray output;
+    QBuffer buffer(&output);
+    if (!buffer.open(QIODevice::WriteOnly)) {
+        return {};
+    }
+
+    const QImage image = img.convertToFormat(QImage::Format_ARGB32);
+    const int width = image.width();
+    const int height = image.height();
+
+    uchar header[18] = {0};
+    header[2] = 2;
+    header[12] = width & 0xFF;
+    header[13] = (width >> 8) & 0xFF;
+    header[14] = height & 0xFF;
+    header[15] = (height >> 8) & 0xFF;
+    header[16] = 32;
+    header[17] = 0;
+
+    buffer.write(reinterpret_cast<const char*>(header), 18);
+
+    for (int y = height - 1; y >= 0; --y) {
+        const QRgb* line = reinterpret_cast<const QRgb*>(image.constScanLine(y));
+        for (int x = 0; x < width; ++x) {
+            const QRgb pixel = line[x];
+            const uchar bgra[4] = {
+                static_cast<uchar>(qBlue(pixel)),
+                static_cast<uchar>(qGreen(pixel)),
+                static_cast<uchar>(qRed(pixel)),
+                static_cast<uchar>(qAlpha(pixel))
+            };
+            buffer.write(reinterpret_cast<const char*>(bgra), 4);
+        }
+    }
+
+    return output;
+}
+
 #ifdef Q_OS_WIN
-static QImage loadDdsWithDirectXTex(const QString& path) {
+static QImage loadDdsWithDirectXTex(const QByteArray& content) {
     QImage result;
+
+    if (content.isEmpty()) {
+        Logger::instance().logWarning("FlagManagerTool", "DDS content is empty.");
+        return result;
+    }
 
     const QString libraryPath = findPluginBinaryPath("DirectXTex");
     if (libraryPath.isEmpty()) {
@@ -127,7 +312,14 @@ static QImage loadDdsWithDirectXTex(const QString& path) {
     int height = 0;
     int stride = 0;
 
-    const int success = loadDdsImage(reinterpret_cast<const wchar_t*>(path.utf16()), &bytes, &width, &height, &stride);
+    const int success = loadDdsImage(
+        reinterpret_cast<const unsigned char*>(content.constData()),
+        content.size(),
+        &bytes,
+        &width,
+        &height,
+        &stride
+    );
     if (!success || !bytes || width <= 0 || height <= 0 || stride <= 0) {
         const QString errorMessage = getLastError ? QString::fromUtf8(getLastError()) : QString("Unknown DirectXTex plugin error.");
         Logger::instance().logWarning("FlagManagerTool", "DirectXTex plugin failed: " + errorMessage);
@@ -601,7 +793,7 @@ void FlagConverterWidget::onCropChanged() {
 
 void FlagConverterWidget::onExportCurrent() {
     if (m_currentPath.isEmpty()) return;
-    if (exportItem(m_items[m_currentPath], ConfigManager::instance().getModPath())) {
+    if (exportItem(m_items[m_currentPath], QString())) {
         QString pathToRemove = m_currentPath;
         removeItem(pathToRemove);
         if (!m_items.isEmpty()) {
@@ -615,7 +807,7 @@ void FlagConverterWidget::onExportCurrent() {
 void FlagConverterWidget::onExportAll() {
     QStringList toRemove;
     for (auto it = m_items.begin(); it != m_items.end(); ++it) {
-        if (exportItem(it.value(), ConfigManager::instance().getModPath())) {
+        if (exportItem(it.value(), QString())) {
             toRemove.append(it.key());
         }
     }
@@ -853,205 +1045,106 @@ static QImage loadImageWithWIC(const QString& path) {
 #endif
 
 QImage FlagConverterWidget::loadImageFile(const QString& path) {
-    QString ext = QFileInfo(path).suffix().toLower();
-    
+    const QString ext = QFileInfo(path).suffix().toLower();
+
 #ifdef Q_OS_WIN
-    // 对于 DDS 格式，使用 DirectXTex
     if (ext == "dds") {
-        QImage img = loadDdsWithDirectXTex(path);
+        QFile file(path);
+        if (!file.open(QIODevice::ReadOnly)) {
+            return QImage();
+        }
+
+        const QImage img = loadDdsWithDirectXTex(file.readAll());
         if (!img.isNull()) return img;
     }
-    
-    // 对于 WebP, JXR 格式，使用 Windows WIC API
+
     if (ext == "webp" || ext == "jxr" || ext == "wdp" || ext == "hdp") {
         QImage img = loadImageWithWIC(path);
         if (!img.isNull()) return img;
     }
 #endif
-    
-    // 对于 TGA 文件，使用自定义解析器
+
     if (ext == "tga") {
         QFile file(path);
         if (!file.open(QIODevice::ReadOnly)) return QImage();
-        
-        QByteArray data = file.readAll();
-        if (data.size() < 18) return QImage();
-        
-        const uchar* ptr = reinterpret_cast<const uchar*>(data.constData());
-        
-        int idLength = ptr[0];
-        int colorMapType = ptr[1];
-        int imageType = ptr[2];
-        int width = ptr[12] | (ptr[13] << 8);
-        int height = ptr[14] | (ptr[15] << 8);
-        int bpp = ptr[16];
-        int descriptor = ptr[17];
-        
-        if (colorMapType != 0 || (imageType != 2 && imageType != 10)) {
-            QImageReader reader(path);
-            if (reader.canRead()) return reader.read();
-            return QImage();
-        }
-        
-        if (bpp != 24 && bpp != 32) return QImage();
-        
-        int bytesPerPixel = bpp / 8;
-        int pixelDataOffset = 18 + idLength;
-        
-        if (data.size() < pixelDataOffset) return QImage();
-        
-        QImage image(width, height, bpp == 32 ? QImage::Format_ARGB32 : QImage::Format_RGB32);
-        
-        const uchar* pixelData = ptr + pixelDataOffset;
-        int pixelCount = width * height;
-        
-        if (imageType == 2) {
-            for (int y = 0; y < height; ++y) {
-                int destY = (descriptor & 0x20) ? y : (height - 1 - y);
-                for (int x = 0; x < width; ++x) {
-                    int srcIdx = (y * width + x) * bytesPerPixel;
-                    if (pixelDataOffset + srcIdx + bytesPerPixel > data.size()) break;
-                    
-                    uchar b = pixelData[srcIdx];
-                    uchar g = pixelData[srcIdx + 1];
-                    uchar r = pixelData[srcIdx + 2];
-                    uchar a = (bytesPerPixel == 4) ? pixelData[srcIdx + 3] : 255;
-                    
-                    image.setPixel(x, destY, qRgba(r, g, b, a));
-                }
-            }
-        } else if (imageType == 10) {
-            int currentPixel = 0;
-            int dataIdx = 0;
-            int maxDataSize = data.size() - pixelDataOffset;
-            
-            while (currentPixel < pixelCount && dataIdx < maxDataSize) {
-                uchar header = pixelData[dataIdx++];
-                int count = (header & 0x7F) + 1;
-                
-                if (header & 0x80) {
-                    if (dataIdx + bytesPerPixel > maxDataSize) break;
-                    uchar b = pixelData[dataIdx];
-                    uchar g = pixelData[dataIdx + 1];
-                    uchar r = pixelData[dataIdx + 2];
-                    uchar a = (bytesPerPixel == 4) ? pixelData[dataIdx + 3] : 255;
-                    dataIdx += bytesPerPixel;
-                    
-                    for (int i = 0; i < count && currentPixel < pixelCount; ++i, ++currentPixel) {
-                        int x = currentPixel % width;
-                        int y = currentPixel / width;
-                        int destY = (descriptor & 0x20) ? y : (height - 1 - y);
-                        image.setPixel(x, destY, qRgba(r, g, b, a));
-                    }
-                } else {
-                    for (int i = 0; i < count && currentPixel < pixelCount; ++i, ++currentPixel) {
-                        if (dataIdx + bytesPerPixel > maxDataSize) break;
-                        uchar b = pixelData[dataIdx];
-                        uchar g = pixelData[dataIdx + 1];
-                        uchar r = pixelData[dataIdx + 2];
-                        uchar a = (bytesPerPixel == 4) ? pixelData[dataIdx + 3] : 255;
-                        dataIdx += bytesPerPixel;
-                        
-                        int x = currentPixel % width;
-                        int y = currentPixel / width;
-                        int destY = (descriptor & 0x20) ? y : (height - 1 - y);
-                        image.setPixel(x, destY, qRgba(r, g, b, a));
-                    }
-                }
-            }
-        }
-        
-        return image;
+        return loadTgaFromData(file.readAll());
     }
-    
-    // 对于其他格式，使用 QImageReader
+
     QImageReader reader(path);
     if (reader.canRead()) {
         return reader.read();
     }
-    
-    // 最后尝试 QImage 直接加载
+
     return QImage(path);
 }
 
-// 保存未压缩32位ARGB TGA文件
-static bool saveTga32(const QImage& img, const QString& path) {
-    QFile file(path);
-    if (!file.open(QIODevice::WriteOnly)) return false;
-    
-    QImage image = img.convertToFormat(QImage::Format_ARGB32);
-    int width = image.width();
-    int height = image.height();
-    
-    // TGA Header (18 bytes)
-    uchar header[18] = {0};
-    header[2] = 2;  // Image type: uncompressed true-color
-    header[12] = width & 0xFF;
-    header[13] = (width >> 8) & 0xFF;
-    header[14] = height & 0xFF;
-    header[15] = (height >> 8) & 0xFF;
-    header[16] = 32; // Bits per pixel
-    header[17] = 0;  // Image descriptor: bottom-to-top
-    
-    file.write(reinterpret_cast<const char*>(header), 18);
-    
-    // Pixel data: BGRA order, bottom row first
-    for (int y = height - 1; y >= 0; --y) {
-        const QRgb* line = reinterpret_cast<const QRgb*>(image.constScanLine(y));
-        for (int x = 0; x < width; ++x) {
-            QRgb pixel = line[x];
-            uchar bgra[4] = {
-                static_cast<uchar>(qBlue(pixel)),
-                static_cast<uchar>(qGreen(pixel)),
-                static_cast<uchar>(qRed(pixel)),
-                static_cast<uchar>(qAlpha(pixel))
-            };
-            file.write(reinterpret_cast<const char*>(bgra), 4);
-        }
-    }
-    
-    file.close();
-    return true;
-}
-
 bool FlagConverterWidget::exportItem(const FlagItem& item, const QString& baseDir) {
-    if (item.name.isEmpty() || baseDir.isEmpty()) return false;
-    
-    // 检查是否有文件会被覆盖
+    Q_UNUSED(baseDir);
+
+    if (item.name.isEmpty()) return false;
+
     struct Size { int w; int h; QString suffix; };
     Size sizes[] = {{82, 52, ""}, {41, 26, "medium/"}, {10, 7, "small/"}};
-    
+
     QStringList existingFiles;
     for (const auto& s : sizes) {
-        QString filePath = baseDir + "/gfx/flags/" + s.suffix + item.name + ".tga";
-        if (QFile::exists(filePath)) {
+        const QString relativePath = "gfx/flags/" + s.suffix + item.name + ".tga";
+        const ToolRuntimeContext::FileReadResult existingResult =
+            ToolRuntimeContext::instance().readFile(ToolRuntimeContext::FileRoot::Mod, relativePath);
+        if (existingResult.success) {
             existingFiles.append(s.suffix + item.name + ".tga");
         }
     }
-    
-    // 如果有文件会被覆盖，询问用户
+
     if (!existingFiles.isEmpty()) {
-        QString fileList = existingFiles.join("\n");
-        QString message = m_tool->getString("ConfirmOverwrite").arg(fileList);
-        
-        QMessageBox::StandardButton result = CustomMessageBox::question(
+        const QString fileList = existingFiles.join("\n");
+        const QString message = m_tool->getString("ConfirmOverwrite").arg(fileList);
+
+        const QMessageBox::StandardButton result = CustomMessageBox::question(
             const_cast<FlagConverterWidget*>(this),
             m_tool->getString("ConfirmOverwriteTitle"),
             message
         );
-        
+
         if (result != QMessageBox::Yes) {
             return false;
         }
     }
-    
-    QImage cropped = item.image.copy(item.crop);
-    for (const auto& s : sizes) {
-        QImage resized = cropped.scaled(s.w, s.h, Qt::IgnoreAspectRatio, Qt::SmoothTransformation);
-        QString dir = baseDir + "/gfx/flags/" + s.suffix;
-        QDir().mkpath(dir);
-        if (!saveTga32(resized, dir + item.name + ".tga")) return false;
+
+    const ToolRuntimeContext::FileWriteResult ensureRootResult =
+        ToolRuntimeContext::instance().ensureDirectory(ToolRuntimeContext::FileRoot::Mod, "gfx/flags");
+    if (!ensureRootResult.success) {
+        Logger::instance().logWarning("FlagManagerTool", "Failed to ensure flags directory: " + ensureRootResult.errorMessage);
+        return false;
     }
+
+    const QImage cropped = item.image.copy(item.crop);
+    for (const auto& s : sizes) {
+        const QImage resized = cropped.scaled(s.w, s.h, Qt::IgnoreAspectRatio, Qt::SmoothTransformation);
+        const QString relativeDir = "gfx/flags/" + s.suffix;
+        const QString relativePath = relativeDir + item.name + ".tga";
+
+        const ToolRuntimeContext::FileWriteResult ensureDirResult =
+            ToolRuntimeContext::instance().ensureDirectory(ToolRuntimeContext::FileRoot::Mod, relativeDir);
+        if (!ensureDirResult.success) {
+            Logger::instance().logWarning("FlagManagerTool", "Failed to ensure export directory: " + ensureDirResult.errorMessage);
+            return false;
+        }
+
+        const QByteArray encoded = saveTga32ToBytes(resized);
+        if (encoded.isEmpty()) {
+            Logger::instance().logWarning("FlagManagerTool", "Failed to encode TGA image for export.");
+            return false;
+        }
+
+        const ToolRuntimeContext::FileWriteResult writeResult =
+            ToolRuntimeContext::instance().writeFile(ToolRuntimeContext::FileRoot::Mod, relativePath, encoded);
+        if (!writeResult.success) {
+            Logger::instance().logWarning("FlagManagerTool", "Failed to export flag: " + writeResult.errorMessage);
+            return false;
+        }
+    }
+
     return true;
 }
 
@@ -1131,7 +1224,7 @@ void FlagBrowserWidget::refreshData() {
     m_flagPaths.clear();
     Logger::instance().logInfo("FlagBrowserWidget", "Cleared");
     
-    Logger::instance().logInfo("FlagBrowserWidget", "Getting tags from TagList plugin...");
+    Logger::instance().logInfo("FlagBrowserWidget", "Getting tags from APEHOI4Parser plugin...");
     QMap<QString, QString> allTags = loadTagsFromPluginRuntime();
     Logger::instance().logInfo("FlagBrowserWidget", QString("Got %1 tags").arg(allTags.size()));
     
@@ -1188,7 +1281,7 @@ void FlagBrowserWidget::refreshData() {
         else found->hasSmall = true;
         
         QString key = baseName + "_" + QString::number(sizeIndex);
-        m_flagPaths[key] = details.absPath;
+        m_flagPaths[key] = {ToolRuntimeContext::FileRoot::Unknown, relPath};
     }
 
     m_tagList->clear();
@@ -1239,98 +1332,19 @@ void FlagBrowserWidget::onTagSelected(QTreeWidgetItem* item, int) {
     updateFlagDisplay();
 }
 
-QImage FlagBrowserWidget::loadTga(const QString& path) {
-    QFile file(path);
-    if (!file.open(QIODevice::ReadOnly)) return QImage();
-    
-    QByteArray data = file.readAll();
-    if (data.size() < 18) return QImage();
-    
-    const uchar* ptr = reinterpret_cast<const uchar*>(data.constData());
-    
-    int idLength = ptr[0];
-    int colorMapType = ptr[1];
-    int imageType = ptr[2];
-    int width = ptr[12] | (ptr[13] << 8);
-    int height = ptr[14] | (ptr[15] << 8);
-    int bpp = ptr[16];
-    int descriptor = ptr[17];
-    
-    if (colorMapType != 0 || (imageType != 2 && imageType != 10)) {
-        QImageReader reader(path);
-        if (reader.canRead()) return reader.read();
+QImage FlagBrowserWidget::loadTga(const FlagFileRef& fileRef) {
+    if (fileRef.relativePath.isEmpty()) {
         return QImage();
     }
-    
-    if (bpp != 24 && bpp != 32) return QImage();
-    
-    int bytesPerPixel = bpp / 8;
-    int pixelDataOffset = 18 + idLength;
-    
-    if (data.size() < pixelDataOffset) return QImage();
-    
-    QImage image(width, height, bpp == 32 ? QImage::Format_ARGB32 : QImage::Format_RGB32);
-    
-    const uchar* pixelData = ptr + pixelDataOffset;
-    int pixelCount = width * height;
-    
-    if (imageType == 2) {
-        for (int y = 0; y < height; ++y) {
-            int destY = (descriptor & 0x20) ? y : (height - 1 - y);
-            for (int x = 0; x < width; ++x) {
-                int srcIdx = (y * width + x) * bytesPerPixel;
-                if (pixelDataOffset + srcIdx + bytesPerPixel > data.size()) break;
-                
-                uchar b = pixelData[srcIdx];
-                uchar g = pixelData[srcIdx + 1];
-                uchar r = pixelData[srcIdx + 2];
-                uchar a = (bytesPerPixel == 4) ? pixelData[srcIdx + 3] : 255;
-                
-                image.setPixel(x, destY, qRgba(r, g, b, a));
-            }
-        }
-    } else if (imageType == 10) {
-        int currentPixel = 0;
-        int dataIdx = 0;
-        int maxDataSize = data.size() - pixelDataOffset;
-        
-        while (currentPixel < pixelCount && dataIdx < maxDataSize) {
-            uchar header = pixelData[dataIdx++];
-            int count = (header & 0x7F) + 1;
-            
-            if (header & 0x80) {
-                if (dataIdx + bytesPerPixel > maxDataSize) break;
-                uchar b = pixelData[dataIdx];
-                uchar g = pixelData[dataIdx + 1];
-                uchar r = pixelData[dataIdx + 2];
-                uchar a = (bytesPerPixel == 4) ? pixelData[dataIdx + 3] : 255;
-                dataIdx += bytesPerPixel;
-                
-                for (int i = 0; i < count && currentPixel < pixelCount; ++i, ++currentPixel) {
-                    int x = currentPixel % width;
-                    int y = currentPixel / width;
-                    int destY = (descriptor & 0x20) ? y : (height - 1 - y);
-                    image.setPixel(x, destY, qRgba(r, g, b, a));
-                }
-            } else {
-                for (int i = 0; i < count && currentPixel < pixelCount; ++i, ++currentPixel) {
-                    if (dataIdx + bytesPerPixel > maxDataSize) break;
-                    uchar b = pixelData[dataIdx];
-                    uchar g = pixelData[dataIdx + 1];
-                    uchar r = pixelData[dataIdx + 2];
-                    uchar a = (bytesPerPixel == 4) ? pixelData[dataIdx + 3] : 255;
-                    dataIdx += bytesPerPixel;
-                    
-                    int x = currentPixel % width;
-                    int y = currentPixel / width;
-                    int destY = (descriptor & 0x20) ? y : (height - 1 - y);
-                    image.setPixel(x, destY, qRgba(r, g, b, a));
-                }
-            }
-        }
+
+    const ToolRuntimeContext::FileReadResult readResult =
+        ToolRuntimeContext::instance().readEffectiveFile(fileRef.relativePath);
+    if (!readResult.success) {
+        Logger::instance().logWarning("FlagBrowserWidget", "Failed to read effective flag file: " + readResult.errorMessage);
+        return QImage();
     }
-    
-    return image;
+
+    return loadTgaFromData(readResult.content);
 }
 
 void FlagBrowserWidget::updateFlagDisplay() {
@@ -1380,11 +1394,11 @@ void FlagBrowserWidget::updateFlagDisplay() {
         img->setStyleSheet(QString("background: %1; border: 1px solid %2;").arg(imgBg, imgBorder));
         
         QString key = v.name + "_" + QString::number(m_currentSizeIndex);
-        QString flagPath = m_flagPaths.value(key);
-        
+        const FlagFileRef fileRef = m_flagPaths.value(key);
+
         QImage flag;
-        if (!flagPath.isEmpty()) {
-            flag = loadTga(flagPath);
+        if (!fileRef.relativePath.isEmpty()) {
+            flag = loadTga(fileRef);
         }
         
         if (!flag.isNull()) {

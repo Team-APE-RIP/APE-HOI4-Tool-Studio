@@ -1,3 +1,11 @@
+//-------------------------------------------------------------------------------------
+// FileManager.h -- Part of APE HOI4 Tool Studio
+//
+// Copyright (C) 2026 Team APE:RIP. All rights reserved.
+// Licensed under the Team APE:RIP Source Code License Agreement.
+//
+// https://github.com/Team-APE-RIP/APE-HOI4-Tool-Studio/
+//-------------------------------------------------------------------------------------
 #ifndef FILEMANAGER_H
 #define FILEMANAGER_H
 
@@ -22,14 +30,12 @@ struct FileDetails {
     
     QJsonObject toJson() const {
         QJsonObject obj;
-        obj["absPath"] = absPath;
         obj["source"] = source;
         return obj;
     }
     
     static FileDetails fromJson(const QJsonObject& obj) {
         FileDetails fd;
-        fd.absPath = obj["absPath"].toString();
         fd.source = obj["source"].toString();
         return fd;
     }

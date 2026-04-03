@@ -1,3 +1,11 @@
+//-------------------------------------------------------------------------------------
+// ToolProxyInterface.cpp -- Part of APE HOI4 Tool Studio
+//
+// Copyright (C) 2026 Team APE:RIP. All rights reserved.
+// Licensed under the Team APE:RIP Source Code License Agreement.
+//
+// https://github.com/Team-APE-RIP/APE-HOI4-Tool-Studio/
+//-------------------------------------------------------------------------------------
 #include "ToolProxyInterface.h"
 #include "Logger.h"
 #include "FileManager.h"
@@ -5,6 +13,7 @@
 #include "LocalizationManager.h"
 #include "ToolDescriptorParser.h"
 #include "PluginManager.h"
+#include "ToolRuntimeContext.h"
 #include <QVBoxLayout>
 #include <QCoreApplication>
 #include <QFile>
@@ -17,6 +26,57 @@
 #ifdef Q_OS_WIN
 #include <windows.h>
 #endif
+
+namespace {
+ToolRuntimeContext::FileRoot parseFileRootFromPayload(const QJsonObject& payload) {
+    return ToolRuntimeContext::fileRootFromString(payload.value("root").toString());
+}
+
+QJsonObject makeFileReadResponsePayload(const ToolRuntimeContext::FileReadResult& result) {
+    QJsonObject payload;
+    payload["success"] = result.success;
+    if (result.success) {
+        payload["contentBase64"] = QString::fromLatin1(result.content.toBase64());
+    } else {
+        payload["error"] = result.errorMessage;
+    }
+    return payload;
+}
+
+QJsonObject makeTextReadResponsePayload(const ToolRuntimeContext::TextReadResult& result) {
+    QJsonObject payload;
+    payload["success"] = result.success;
+    if (result.success) {
+        payload["content"] = result.content;
+    } else {
+        payload["error"] = result.errorMessage;
+    }
+    return payload;
+}
+
+QJsonObject makeWriteResponsePayload(const ToolRuntimeContext::FileWriteResult& result) {
+    QJsonObject payload;
+    payload["success"] = result.success;
+    if (!result.success) {
+        payload["error"] = result.errorMessage;
+    }
+    return payload;
+}
+
+QJsonArray makeDirectoryEntriesJson(const QList<ToolRuntimeContext::DirectoryEntry>& entries) {
+    QJsonArray array;
+    for (const ToolRuntimeContext::DirectoryEntry& entry : entries) {
+        QJsonObject object;
+        object["relativePath"] = entry.relativePath;
+        object["name"] = entry.name;
+        object["isDirectory"] = entry.isDirectory;
+        object["size"] = static_cast<qint64>(entry.size);
+        object["lastModifiedUtc"] = entry.lastModifiedUtc.toString(Qt::ISODateWithMs);
+        array.append(object);
+    }
+    return array;
+}
+} // namespace
 
 // ============================================================================
 // ToolEmbedContainer Implementation
@@ -1031,6 +1091,15 @@ void ToolProxyInterface::handleMessage(const ToolIpc::Message& msg) {
     case ToolIpc::MessageType::GetConfig:
     case ToolIpc::MessageType::GetFileIndex:
     case ToolIpc::MessageType::GetPluginBinaryPath:
+    case ToolIpc::MessageType::ReadBinaryFile:
+    case ToolIpc::MessageType::ReadTextFile:
+    case ToolIpc::MessageType::ReadEffectiveBinaryFile:
+    case ToolIpc::MessageType::ReadEffectiveTextFile:
+    case ToolIpc::MessageType::WriteBinaryFile:
+    case ToolIpc::MessageType::WriteTextFile:
+    case ToolIpc::MessageType::RemovePath:
+    case ToolIpc::MessageType::EnsureDirectory:
+    case ToolIpc::MessageType::ListDirectory:
         // Handle data requests from tool
         handleDataRequest(msg);
         break;
@@ -1123,6 +1192,176 @@ void ToolProxyInterface::handleDataRequest(const ToolIpc::Message& msg) {
                 "ToolProxyInterface",
                 QString("Granted plugin binary path to tool %1 for plugin %2").arg(m_toolInfo.id, pluginName)
             );
+        }
+        break;
+
+    case ToolIpc::MessageType::ReadBinaryFile:
+        {
+            const ToolRuntimeContext::FileRoot root = parseFileRootFromPayload(msg.payload);
+            const QString relativePath = msg.payload.value("relativePath").toString();
+            payload["root"] = ToolRuntimeContext::fileRootToString(root);
+            payload["relativePath"] = relativePath;
+
+            const ToolRuntimeContext::FileReadResult result =
+                ToolRuntimeContext::instance().readFile(root, relativePath);
+            const QJsonObject resultPayload = makeFileReadResponsePayload(result);
+            for (auto it = resultPayload.begin(); it != resultPayload.end(); ++it) {
+                payload[it.key()] = it.value();
+            }
+
+            sendMessage(ToolIpc::MessageType::ReadBinaryFileResponse, payload, msg.requestId);
+        }
+        break;
+
+    case ToolIpc::MessageType::ReadTextFile:
+        {
+            const ToolRuntimeContext::FileRoot root = parseFileRootFromPayload(msg.payload);
+            const QString relativePath = msg.payload.value("relativePath").toString();
+            payload["root"] = ToolRuntimeContext::fileRootToString(root);
+            payload["relativePath"] = relativePath;
+
+            const ToolRuntimeContext::TextReadResult result =
+                ToolRuntimeContext::instance().readTextFile(root, relativePath);
+            const QJsonObject resultPayload = makeTextReadResponsePayload(result);
+            for (auto it = resultPayload.begin(); it != resultPayload.end(); ++it) {
+                payload[it.key()] = it.value();
+            }
+
+            sendMessage(ToolIpc::MessageType::ReadTextFileResponse, payload, msg.requestId);
+        }
+        break;
+
+    case ToolIpc::MessageType::ReadEffectiveBinaryFile:
+        {
+            const QString relativePath = msg.payload.value("relativePath").toString();
+            payload["relativePath"] = relativePath;
+
+            const ToolRuntimeContext::FileReadResult result =
+                ToolRuntimeContext::instance().readEffectiveFile(relativePath);
+            const QJsonObject resultPayload = makeFileReadResponsePayload(result);
+            for (auto it = resultPayload.begin(); it != resultPayload.end(); ++it) {
+                payload[it.key()] = it.value();
+            }
+
+            sendMessage(ToolIpc::MessageType::ReadEffectiveBinaryFileResponse, payload, msg.requestId);
+        }
+        break;
+
+    case ToolIpc::MessageType::ReadEffectiveTextFile:
+        {
+            const QString relativePath = msg.payload.value("relativePath").toString();
+            payload["relativePath"] = relativePath;
+
+            const ToolRuntimeContext::TextReadResult result =
+                ToolRuntimeContext::instance().readEffectiveTextFile(relativePath);
+            const QJsonObject resultPayload = makeTextReadResponsePayload(result);
+            for (auto it = resultPayload.begin(); it != resultPayload.end(); ++it) {
+                payload[it.key()] = it.value();
+            }
+
+            sendMessage(ToolIpc::MessageType::ReadEffectiveTextFileResponse, payload, msg.requestId);
+        }
+        break;
+
+    case ToolIpc::MessageType::WriteBinaryFile:
+        {
+            const ToolRuntimeContext::FileRoot root = parseFileRootFromPayload(msg.payload);
+            const QString relativePath = msg.payload.value("relativePath").toString();
+            const QByteArray content =
+                QByteArray::fromBase64(msg.payload.value("contentBase64").toString().toLatin1());
+
+            payload["root"] = ToolRuntimeContext::fileRootToString(root);
+            payload["relativePath"] = relativePath;
+
+            const ToolRuntimeContext::FileWriteResult result =
+                ToolRuntimeContext::instance().writeFile(root, relativePath, content);
+            const QJsonObject resultPayload = makeWriteResponsePayload(result);
+            for (auto it = resultPayload.begin(); it != resultPayload.end(); ++it) {
+                payload[it.key()] = it.value();
+            }
+
+            sendMessage(ToolIpc::MessageType::WriteBinaryFileResponse, payload, msg.requestId);
+        }
+        break;
+
+    case ToolIpc::MessageType::WriteTextFile:
+        {
+            const ToolRuntimeContext::FileRoot root = parseFileRootFromPayload(msg.payload);
+            const QString relativePath = msg.payload.value("relativePath").toString();
+            const QString content = msg.payload.value("content").toString();
+
+            payload["root"] = ToolRuntimeContext::fileRootToString(root);
+            payload["relativePath"] = relativePath;
+
+            const ToolRuntimeContext::FileWriteResult result =
+                ToolRuntimeContext::instance().writeTextFile(root, relativePath, content);
+            const QJsonObject resultPayload = makeWriteResponsePayload(result);
+            for (auto it = resultPayload.begin(); it != resultPayload.end(); ++it) {
+                payload[it.key()] = it.value();
+            }
+
+            sendMessage(ToolIpc::MessageType::WriteTextFileResponse, payload, msg.requestId);
+        }
+        break;
+
+    case ToolIpc::MessageType::RemovePath:
+        {
+            const ToolRuntimeContext::FileRoot root = parseFileRootFromPayload(msg.payload);
+            const QString relativePath = msg.payload.value("relativePath").toString();
+
+            payload["root"] = ToolRuntimeContext::fileRootToString(root);
+            payload["relativePath"] = relativePath;
+
+            const ToolRuntimeContext::FileWriteResult result =
+                ToolRuntimeContext::instance().removePath(root, relativePath);
+            const QJsonObject resultPayload = makeWriteResponsePayload(result);
+            for (auto it = resultPayload.begin(); it != resultPayload.end(); ++it) {
+                payload[it.key()] = it.value();
+            }
+
+            sendMessage(ToolIpc::MessageType::RemovePathResponse, payload, msg.requestId);
+        }
+        break;
+
+    case ToolIpc::MessageType::EnsureDirectory:
+        {
+            const ToolRuntimeContext::FileRoot root = parseFileRootFromPayload(msg.payload);
+            const QString relativePath = msg.payload.value("relativePath").toString();
+
+            payload["root"] = ToolRuntimeContext::fileRootToString(root);
+            payload["relativePath"] = relativePath;
+
+            const ToolRuntimeContext::FileWriteResult result =
+                ToolRuntimeContext::instance().ensureDirectory(root, relativePath);
+            const QJsonObject resultPayload = makeWriteResponsePayload(result);
+            for (auto it = resultPayload.begin(); it != resultPayload.end(); ++it) {
+                payload[it.key()] = it.value();
+            }
+
+            sendMessage(ToolIpc::MessageType::EnsureDirectoryResponse, payload, msg.requestId);
+        }
+        break;
+
+    case ToolIpc::MessageType::ListDirectory:
+        {
+            const ToolRuntimeContext::FileRoot root = parseFileRootFromPayload(msg.payload);
+            const QString relativePath = msg.payload.value("relativePath").toString();
+            const bool recursive = msg.payload.value("recursive").toBool(false);
+
+            payload["root"] = ToolRuntimeContext::fileRootToString(root);
+            payload["relativePath"] = relativePath;
+            payload["recursive"] = recursive;
+
+            const ToolRuntimeContext::DirectoryListResult result =
+                ToolRuntimeContext::instance().listDirectory(root, relativePath, recursive);
+            payload["success"] = result.success;
+            if (result.success) {
+                payload["entries"] = makeDirectoryEntriesJson(result.entries);
+            } else {
+                payload["error"] = result.errorMessage;
+            }
+
+            sendMessage(ToolIpc::MessageType::ListDirectoryResponse, payload, msg.requestId);
         }
         break;
         

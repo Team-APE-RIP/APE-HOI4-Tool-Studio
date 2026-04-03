@@ -1,5 +1,5 @@
-id="20000001"
+id="20000003"
 name="DirectXMath"
-version="1.0.0"
-supported_version="2.0.*;2.1.*"
+version="1.1.0"
+supported_version="2.2.*"
 author="Microsoft"

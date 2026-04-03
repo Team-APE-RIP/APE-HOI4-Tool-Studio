@@ -1,3 +1,11 @@
+//-------------------------------------------------------------------------------------
+// ConfigManager.cpp -- Part of APE HOI4 Tool Studio
+//
+// Copyright (C) 2026 Team APE:RIP. All rights reserved.
+// Licensed under the Team APE:RIP Source Code License Agreement.
+//
+// https://github.com/Team-APE-RIP/APE-HOI4-Tool-Studio/
+//-------------------------------------------------------------------------------------
 #include "ConfigManager.h"
 #include "Logger.h"
 #include <QStandardPaths>
@@ -217,26 +225,21 @@ bool ConfigManager::isCurrentThemeDark() const {
 
 QJsonObject ConfigManager::toJson() const {
     QJsonObject obj;
-    obj["gamePath"] = m_gamePath;
-    obj["modPath"] = m_modPath;
-    obj["docPath"] = m_docPath;
     obj["language"] = m_language;
     obj["theme"] = static_cast<int>(m_theme);
     obj["debugMode"] = m_debugMode;
+    obj["maxLogFiles"] = m_maxLogFiles;
     return obj;
 }
 
 void ConfigManager::setFromJson(const QJsonObject& obj) {
-    if (obj.contains("gamePath")) m_gamePath = obj["gamePath"].toString();
-    if (obj.contains("modPath")) m_modPath = obj["modPath"].toString();
-    if (obj.contains("docPath")) m_docPath = obj["docPath"].toString();
     if (obj.contains("language")) m_language = obj["language"].toString();
     if (obj.contains("theme")) m_theme = static_cast<Theme>(obj["theme"].toInt());
     if (obj.contains("debugMode")) m_debugMode = obj["debugMode"].toBool();
     if (obj.contains("maxLogFiles")) m_maxLogFiles = obj["maxLogFiles"].toInt();
 
     Logger::instance().setMaxLogFiles(m_maxLogFiles);
-    Logger::instance().logInfo("ConfigManager", "Loaded config from IPC data");
+    Logger::instance().logInfo("ConfigManager", "Loaded sanitized config from IPC data");
 }
 
 QString ConfigManager::getComboBoxItemStyle(bool isDark) {

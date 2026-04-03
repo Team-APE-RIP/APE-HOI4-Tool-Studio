@@ -33,7 +33,7 @@ void FileTreeWidget::setupUi() {
 
     // Tree
     m_tree = new QTreeWidget();
-    m_tree->setHeaderLabels({"Name", "Source", "Path"});
+    m_tree->setHeaderLabels({"Name", "Source", "Relative Path"});
     m_tree->setColumnWidth(0, 300);
     m_tree->setColumnWidth(1, 100);
     m_tree->setAlternatingRowColors(true);
@@ -188,17 +188,16 @@ void FileTreeWidget::buildTree() {
     QIcon fileIcon = getIcon(false, isDark);
 
     for (const QString& relPath : paths) {
-        FileDetails details = files[relPath];
-        QString absPath = details.absPath;
-        QString source = details.source;
+        const FileDetails details = files[relPath];
+        const QString source = details.source;
         
         QStringList parts = relPath.split('/');
         QString currentPath = "";
         QTreeWidgetItem *parentItem = nullptr;
 
         for (int i = 0; i < parts.size(); ++i) {
-            QString part = parts[i];
-            bool isFile = (i == parts.size() - 1);
+            const QString part = parts[i];
+            const bool isFile = (i == parts.size() - 1);
             
             if (!currentPath.isEmpty()) currentPath += "/";
             currentPath += part;
@@ -207,16 +206,16 @@ void FileTreeWidget::buildTree() {
                 QTreeWidgetItem *item = new QTreeWidgetItem(parentItem ? parentItem : m_tree->invisibleRootItem());
                 item->setText(0, part);
                 item->setText(1, source);
-                item->setText(2, absPath); // Hidden or visible? Visible for now
-                item->setData(0, Qt::UserRole, absPath);
+                item->setText(2, relPath);
+                item->setData(0, Qt::UserRole, relPath);
                 
-                // Icon
                 item->setIcon(0, fileIcon);
             } else {
-                // Directory
                 if (!dirItems.contains(currentPath)) {
                     QTreeWidgetItem *item = new QTreeWidgetItem(parentItem ? parentItem : m_tree->invisibleRootItem());
                     item->setText(0, part);
+                    item->setText(2, currentPath);
+                    item->setData(0, Qt::UserRole, currentPath);
                     item->setIcon(0, folderIcon);
                     dirItems.insert(currentPath, item);
                     parentItem = item;
@@ -237,11 +236,12 @@ void FileTreeWidget::filterChanged(const QString &text) {
 }
 
 void FileTreeWidget::onItemClicked(QTreeWidgetItem *item, int column) {
-    QString path = item->data(0, Qt::UserRole).toString();
+    Q_UNUSED(column);
+
+    const QString path = item->data(0, Qt::UserRole).toString();
     if (!path.isEmpty()) {
         m_pathLabel->setText(path);
     } else {
-        // Directory
         m_pathLabel->setText(item->text(0));
     }
 }
