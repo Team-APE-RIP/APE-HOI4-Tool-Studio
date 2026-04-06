@@ -71,19 +71,20 @@ void ConfigManager::loadDefaults() {
 
 QString ConfigManager::normalizeLanguageCode(const QString& value) const {
     const QString normalized = value.trimmed();
-    if (normalized == "�S-�") {
+    if (normalized == "简体中文") {
         return "zh_CN";
     }
-    if (normalized == "A�-�") {
+    if (normalized == "繁體中文") {
         return "zh_TW";
     }
     if (normalized == "English") {
         return "en_US";
     }
-    if (normalized == "zh_CN" || normalized == "zh_TW" || normalized == "en_US") {
-        return normalized;
+    if (normalized.isEmpty()) {
+        return "en_US";
     }
-    return "en_US";
+
+    return normalized;
 }
 
 void ConfigManager::removeLegacyFile(const QString& filePath) const {
