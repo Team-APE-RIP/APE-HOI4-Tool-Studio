@@ -1,0 +1,13 @@
+l_zh_TW:
+  AccountTitle: "帳戶"
+  Group_AccountInfo: "帳戶資訊"
+  UserInfo_Title: "當前用戶"
+  UpdateChannel_Title: "更新通道"
+  LogoutBtn: "登出"
+  NotLoggedIn: "未登入"
+  channel.stable.name: "正式版"
+  channel.stable.description: "穩定發布通道"
+  channel.alpha.name: "內測版"
+  channel.alpha.description: "實驗性預覽通道"
+  channel.beta.name: "測試版"
+  channel.beta.description: "預覽發布通道"

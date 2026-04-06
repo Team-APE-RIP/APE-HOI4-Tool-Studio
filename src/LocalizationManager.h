@@ -9,9 +9,9 @@
 #ifndef LOCALIZATIONMANAGER_H
 #define LOCALIZATIONMANAGER_H
 
-#include <QString>
-#include <QJsonObject>
 #include <QMap>
+#include <QString>
+#include <QStringList>
 
 class LocalizationManager {
 public:
@@ -19,16 +19,31 @@ public:
 
     void loadLanguage(const QString& langCode);
     QString getString(const QString& category, const QString& key) const;
-    // Returns the current language locale code (e.g. "zh_CN", "en_US")
     QString currentLang() const;
+
+    QStringList availableLanguageCodes() const;
+    QStringList availableLanguageDisplayNames() const;
+    QString displayNameForLanguage(const QString& langCode) const;
+    QString normalizeLanguageCode(const QString& value) const;
 
 private:
     LocalizationManager();
-    void loadFile(const QString& category, const QString& path);
 
-    // Map<Category, Map<Key, Value>>
+    void ensureLanguageMetadataLoaded();
+    void reloadLanguageMetadata();
+    void loadLanguageIntoMap(const QString& langCode, QMap<QString, QMap<QString, QString>>& targetMap) const;
+    void loadLanguageCategoryFile(const QString& langCode,
+                                  const QString& fileName,
+                                  QMap<QString, QMap<QString, QString>>& targetMap) const;
+
+    QMap<QString, QString> parseMetaFile(const QString& path) const;
+    QMap<QString, QString> parseSimpleYamlFile(const QString& path) const;
+
     QMap<QString, QMap<QString, QString>> m_translations;
     QString m_currentLang;
+    QMap<QString, QString> m_languageTextByCode;
+    QMap<QString, QString> m_languageCodeByText;
+    bool m_languageMetadataLoaded = false;
 };
 
 #endif // LOCALIZATIONMANAGER_H

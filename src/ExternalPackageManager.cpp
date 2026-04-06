@@ -547,8 +547,20 @@ bool ExternalPackageManager::toolPackageIsComplete(const QString& directoryPath,
         return false;
     }
 
-    const QDir localizationDir(QDir(directoryPath).filePath("localization"));
-    if (!localizationDir.exists() || localizationDir.entryList(QStringList() << "*.json", QDir::Files).isEmpty()) {
+    const QDir localisationDir(QDir(directoryPath).filePath("localisation"));
+    bool hasLocalisationFiles = false;
+    if (localisationDir.exists()) {
+        const QFileInfoList languageDirs = localisationDir.entryInfoList(QDir::Dirs | QDir::NoDotAndDotDot);
+        for (const QFileInfo& languageDir : languageDirs) {
+            const QDir languagePath(languageDir.absoluteFilePath());
+            if (languagePath.exists("strings.yml") || !languagePath.entryList(QStringList() << "*.yml", QDir::Files).isEmpty()) {
+                hasLocalisationFiles = true;
+                break;
+            }
+        }
+    }
+
+    if (!hasLocalisationFiles) {
         if (errorMessage) {
             *errorMessage = loc.getString("ExternalPackage", "ToolLocalizationMissing").arg(toolName);
         }

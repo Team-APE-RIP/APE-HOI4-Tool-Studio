@@ -10,7 +10,6 @@
 #include <QFileInfo>
 #include <QGuiApplication>
 #include <QHeaderView>
-#include <QJsonDocument>
 #include <QMenu>
 #include <QMetaObject>
 #include <QPainter>
@@ -1054,7 +1053,7 @@ QIcon LogManagerTool::icon() const {
 }
 
 void LogManagerTool::initialize() {
-    loadLanguage("English");
+    loadLanguage("en_US");
 }
 
 QWidget* LogManagerTool::createWidget(QWidget* parent) {
@@ -1091,20 +1090,32 @@ QWidget* LogManagerTool::createSidebarWidget(QWidget* parent) {
 }
 
 void LogManagerTool::loadLanguage(const QString& lang) {
-    m_currentLang = lang;
+    const QString normalizedLang = normalizeLanguageCode(lang);
+    const QString rootPath = localisationRootPath();
 
-    QDir appDir(QCoreApplication::applicationDirPath());
-    const QString locPath = appDir.filePath("tools/LogManagerTool/localization");
-    const QString langFile = (lang == "English" ? "en_US" : (lang == "简体中文" ? "zh_CN" : "zh_TW"));
+    m_currentLang = normalizedLang;
+    m_localizedStrings.clear();
 
-    QFile file(locPath + "/" + langFile + ".json");
-    if (!file.open(QIODevice::ReadOnly)) {
-        return;
+    const QMap<QString, QString> englishStrings = parseSimpleYamlFile(rootPath + "/en_US/strings.yml");
+    for (auto it = englishStrings.constBegin(); it != englishStrings.constEnd(); ++it) {
+        m_localizedStrings.insert(it.key(), it.value());
     }
 
-    m_localizedStrings = QJsonDocument::fromJson(file.readAll()).object();
-    m_localizedNames[lang] = m_localizedStrings.value("Name").toString();
-    m_localizedDescs[lang] = m_localizedStrings.value("Description").toString();
+    if (normalizedLang != "en_US") {
+        const QMap<QString, QString> selectedStrings =
+            parseSimpleYamlFile(rootPath + "/" + normalizedLang + "/strings.yml");
+        for (auto it = selectedStrings.constBegin(); it != selectedStrings.constEnd(); ++it) {
+            m_localizedStrings.insert(it.key(), it.value());
+        }
+    }
+
+    m_localizedNames["en_US"] = englishStrings.value("Name", "Log Manager");
+    m_localizedDescs["en_US"] = englishStrings.value("Description", "View, filter, and compare game error logs");
+
+    if (normalizedLang != "en_US") {
+        m_localizedNames[normalizedLang] = m_localizedStrings.value("Name", m_localizedNames.value("en_US"));
+        m_localizedDescs[normalizedLang] = m_localizedStrings.value("Description", m_localizedDescs.value("en_US"));
+    }
 
     if (m_mainWidget) {
         m_mainWidget->updateTexts();
@@ -1126,7 +1137,7 @@ void LogManagerTool::applyTheme() {
 }
 
 QString LogManagerTool::getString(const QString& key) const {
-    return m_localizedStrings.value(key).toString(key);
+    return m_localizedStrings.value(key, key);
 }
 
 QString LogManagerTool::getGameDocsPath() const {
@@ -1706,4 +1717,113 @@ void LogManagerTool::startCompareFileLoadAsync(const QString& displayName) {
             self->setLoadingState(false);
         }, Qt::QueuedConnection);
     }).detach();
+}
+
+QString LogManagerTool::normalizeLanguageCode(const QString& lang) const {
+    const QString normalized = lang.trimmed();
+    const QString rootPath = localisationRootPath();
+    QDir rootDir(rootPath);
+    
+    if (!rootDir.exists()) {
+        return "en_US";
+    }
+
+    const QStringList languageDirectories = rootDir.entryList(QDir::Dirs | QDir::NoDotAndDotDot, QDir::Name);
+    
+    // Exact match
+    if (languageDirectories.contains(normalized)) {
+        return normalized;
+    }
+    
+    // Scan meta.htsl for text match
+    for (const QString& dirName : languageDirectories) {
+        const QString metaPath = rootDir.filePath(dirName + "/meta.htsl");
+        const QMap<QString, QString> meta = parseSimpleYamlFile(metaPath); // Using the same parser for simplicity, though it's technically a different format, it works for simple key=value if we adjust or just use a basic parser.
+        // Wait, parseSimpleYamlFile expects 'l_xxx:' root. meta.htsl is just 'key=value'.
+        // Let's just do a simple read here.
+        QFile file(metaPath);
+        if (file.open(QIODevice::ReadOnly | QIODevice::Text)) {
+            QTextStream stream(&file);
+            while (!stream.atEnd()) {
+                QString line = stream.readLine().trimmed();
+                if (line.startsWith("text=") || line.startsWith("text =")) {
+                    QString text = line.mid(line.indexOf('=') + 1).trimmed();
+                    if (text.startsWith('"') && text.endsWith('"')) {
+                        text = text.mid(1, text.length() - 2);
+                    }
+                    if (text == normalized) {
+                        return dirName;
+                    }
+                }
+            }
+        }
+    }
+
+    return "en_US";
+}
+
+QString LogManagerTool::localisationRootPath() const {
+    QDir appDir(QCoreApplication::applicationDirPath());
+
+    if (QDir(appDir.filePath("tools/LogManagerTool/localisation")).exists()) {
+        return appDir.filePath("tools/LogManagerTool/localisation");
+    }
+    if (QDir(appDir.filePath("../tools/LogManagerTool/localisation")).exists()) {
+        return appDir.filePath("../tools/LogManagerTool/localisation");
+    }
+    return appDir.filePath("tools/LogManagerTool/localisation");
+}
+
+QMap<QString, QString> LogManagerTool::parseSimpleYamlFile(const QString& filePath) const {
+    QMap<QString, QString> parsed;
+    QFile file(filePath);
+    if (!file.open(QIODevice::ReadOnly | QIODevice::Text)) {
+        return parsed;
+    }
+
+    QTextStream stream(&file);
+#if QT_VERSION >= QT_VERSION_CHECK(6, 0, 0)
+    stream.setEncoding(QStringConverter::Utf8);
+#endif
+
+    bool inLanguageBlock = false;
+    while (!stream.atEnd()) {
+        QString line = stream.readLine();
+        if (line.trimmed().isEmpty()) {
+            continue;
+        }
+
+        if (!line.startsWith(' ') && !line.startsWith('\t')) {
+            if (line.trimmed().startsWith("l_") && line.trimmed().endsWith(':')) {
+                inLanguageBlock = true;
+            }
+            continue;
+        }
+
+        if (!inLanguageBlock) {
+            continue;
+        }
+
+        const QString trimmed = line.trimmed();
+        if (trimmed.startsWith('#')) {
+            continue;
+        }
+
+        const int colonIndex = trimmed.indexOf(':');
+        if (colonIndex <= 0) {
+            continue;
+        }
+
+        const QString key = trimmed.left(colonIndex).trimmed();
+        QString value = trimmed.mid(colonIndex + 1).trimmed();
+
+        if ((value.startsWith('"') && value.endsWith('"')) || (value.startsWith('\'') && value.endsWith('\''))) {
+            value = value.mid(1, value.length() - 2);
+        }
+
+        value.replace("\\n", "\n");
+        parsed.insert(key, value);
+    }
+
+    return parsed;
 }

@@ -472,11 +472,14 @@ void SettingsPage::setupUi() {
     accessibilityLayout->setSpacing(0);
 
     m_languageCombo = new QComboBox();
-    m_languageCombo->addItems({"English", "简体中文", "繁體中文"});
-    m_languageCombo->setCurrentText(ConfigManager::instance().getLanguage());
-    connect(m_languageCombo, &QComboBox::currentTextChanged, [this](const QString &lang) {
-        if (lang != ConfigManager::instance().getLanguage()) {
-            ConfigManager::instance().setLanguage(lang);
+    m_languageCombo->addItems(LocalizationManager::instance().availableLanguageDisplayNames());
+    m_languageCombo->setCurrentText(
+        LocalizationManager::instance().displayNameForLanguage(ConfigManager::instance().getLanguage())
+    );
+    connect(m_languageCombo, &QComboBox::currentTextChanged, [this](const QString &langText) {
+        const QString langCode = LocalizationManager::instance().normalizeLanguageCode(langText);
+        if (langCode != ConfigManager::instance().getLanguage()) {
+            ConfigManager::instance().setLanguage(langCode);
             emit languageChanged();
         }
     });
@@ -812,6 +815,14 @@ void SettingsPage::updateTexts() {
         langTitle->setText(loc.getString("SettingsPage", "Lang_Title"));
     if (QLabel *langDesc = findChild<QLabel *>("Lang_Desc"))
         langDesc->setText(loc.getString("SettingsPage", "Lang_Desc"));
+    if (m_languageCombo) {
+        QSignalBlocker blocker(m_languageCombo);
+        const QString currentDisplayName =
+            loc.displayNameForLanguage(ConfigManager::instance().getLanguage());
+        m_languageCombo->clear();
+        m_languageCombo->addItems(loc.availableLanguageDisplayNames());
+        m_languageCombo->setCurrentText(currentDisplayName);
+    }
 
     if (QLabel *debugTitle = findChild<QLabel *>("Debug_Title"))
         debugTitle->setText(loc.getString("SettingsPage", "Debug_Title"));

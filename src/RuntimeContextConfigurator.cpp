@@ -546,7 +546,7 @@ void configurePluginRuntimeContext() {
         for (auto it = effectiveFiles.constBegin(); it != effectiveFiles.constEnd(); ++it) {
             PluginRuntimeContext::EffectiveFileEntry entry;
             entry.logicalPath = it.key();
-            entry.source = mapPluginEffectiveFileSource(it.value().source);
+            entry.source = mapPluginEffectiveFileSource(it.value().sourceString());
             result.entries.append(entry);
         }
 

@@ -11,14 +11,15 @@
 #include <QDialog>
 #include <QLabel>
 #include <QLineEdit>
-#include <QPushButton>
-#include <QComboBox>
-#include <QProgressBar>
-#include <QVBoxLayout>
-#include <QHBoxLayout>
-#include <QJsonObject>
+#include <QMap>
 #include <QMouseEvent>
 #include <QPoint>
+#include <QProgressBar>
+#include <QPushButton>
+#include <QComboBox>
+#include <QStringList>
+#include <QVBoxLayout>
+#include <QHBoxLayout>
 #include <QWidget>
 
 class Setup : public QDialog {
@@ -47,7 +48,19 @@ private:
     void applyTheme();
     bool detectSystemDarkMode();
 
-    QJsonObject currentLoc;
+    void migrateLegacySettings();
+    void populateLanguageCombo();
+    QString normalizeLanguageCode(const QString& value) const;
+    QString displayTextForLanguage(const QString& langCode) const;
+    QString currentInstallPath() const;
+    bool currentAutoSetupFlag() const;
+
+    QMap<QString, QString> parseMetaFile(const QString& path) const;
+    QMap<QString, QString> parseSimpleYamlFile(const QString& path) const;
+    QString localizedValue(const QString& key, const QString& fallback = QString()) const;
+
+    QMap<QString, QString> currentLoc;
+    QMap<QString, QString> m_languageTextByCode;
 
     QWidget* m_centralWidget;
     QLabel* titleLabel;

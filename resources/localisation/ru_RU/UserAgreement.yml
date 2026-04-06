@@ -1,0 +1,8 @@
+l_ru_RU:
+  Title: "Пользовательское соглашение APE HOI4 Tool Studio (%1)"
+  Accept: "Принять"
+  Reject: "Отклонить"
+  Close: "Закрыть"
+  ScrollToBottomPrompt: "Прокрутите вниз, чтобы продолжить."
+  WaitCountdownPrompt: "Подождите %1 сек., чтобы принять."
+  ReadyToAcceptPrompt: "Теперь вы можете принять."

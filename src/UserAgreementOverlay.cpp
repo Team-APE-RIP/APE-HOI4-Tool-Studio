@@ -16,8 +16,6 @@
 #include <QFile>
 #include <QJsonDocument>
 #include <QJsonObject>
-#include <QStandardPaths>
-#include <QDir>
 #include <QDebug>
 #include <QScrollBar>
 #include <QTextCursor>
@@ -244,45 +242,30 @@ QString UserAgreementOverlay::getUAVVersion() {
 }
 
 QString UserAgreementOverlay::getUAVCheckVersion() {
-    QString tempDir = QStandardPaths::writableLocation(QStandardPaths::TempLocation) + "/APE-HOI4-Tool-Studio";
-    QFile file(tempDir + "/UAVCheck.json");
-    if (file.open(QIODevice::ReadOnly | QIODevice::Text)) {
-        QByteArray data = file.readAll();
-        QJsonDocument doc = QJsonDocument::fromJson(data);
-        if (doc.isObject()) {
-            return doc.object()["UAVCheck"].toString();
-        }
-    }
-    return "0.0.0.0";
+    return AgreementEvidenceManager::instance().acceptedAgreementVersion();
 }
 
 void UserAgreementOverlay::saveUAVCheckVersion(const QString& version) {
-    QString tempDir = QStandardPaths::writableLocation(QStandardPaths::TempLocation) + "/APE-HOI4-Tool-Studio";
-    QDir().mkpath(tempDir);
-    
-    QFile file(tempDir + "/UAVCheck.json");
-    if (file.open(QIODevice::WriteOnly | QIODevice::Text)) {
-        QJsonObject obj;
-        obj["UAVCheck"] = version;
-        QJsonDocument doc(obj);
-        file.write(doc.toJson());
-    }
+    AgreementEvidenceManager::instance().storeAcceptedAgreementVersion(version);
 }
 
 void UserAgreementOverlay::loadAgreementContent() {
-    QString lang = ConfigManager::instance().getLanguage();
-    QString mdPath;
-    
-    if (lang == "简体中文") {
+    const QString lang = ConfigManager::instance().getLanguage();
+    QString mdPath = ":/UserAgreement/en_US.md";
+
+    if (lang == "zh_CN") {
         mdPath = ":/UserAgreement/zh_CN.md";
-    } else if (lang == "繁體中文") {
+    } else if (lang == "zh_TW") {
         mdPath = ":/UserAgreement/zh_TW.md";
-    } else {
-        mdPath = ":/UserAgreement/en_US.md";
     }
-    
+
     QFile file(mdPath);
-    if (file.open(QIODevice::ReadOnly | QIODevice::Text)) {
+    if (!file.open(QIODevice::ReadOnly | QIODevice::Text) && mdPath != ":/UserAgreement/en_US.md") {
+        file.setFileName(":/UserAgreement/en_US.md");
+        file.open(QIODevice::ReadOnly | QIODevice::Text);
+    }
+
+    if (file.isOpen()) {
         QString content = QString::fromUtf8(file.readAll());
         m_textBrowser->setMarkdown(content);
     } else {

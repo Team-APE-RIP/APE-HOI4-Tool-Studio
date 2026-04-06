@@ -724,16 +724,6 @@ void Update::finishUpdate() {
     m_progressBar->setValue(100);
     m_progressTextLabel->setText(LocalizationManager::instance().getString("Update", "download_complete"));
 
-    const QString appDir = QCoreApplication::applicationDirPath();
-    const QString updaterPath = QDir(appDir).filePath("Updater.exe");
-
-    if (!QFile::exists(updaterPath)) {
-        qDebug() << "Updater.exe not found at:" << updaterPath;
-        m_bottomStack->setCurrentIndex(0);
-        m_updateBtn->setText(LocalizationManager::instance().getString("Update", "update_now"));
-        return;
-    }
-
     const QString manifestListPath = QDir(m_tempDir).filePath("manifest_files.txt");
     QFile manifestListFile(manifestListPath);
     if (manifestListFile.open(QIODevice::WriteOnly | QIODevice::Text)) {
@@ -744,6 +734,25 @@ void Update::finishUpdate() {
         manifestListFile.close();
     } else {
         qDebug() << "Failed to write manifest_files.txt";
+    }
+
+    QString appDir = QCoreApplication::applicationDirPath();
+    QString updaterPath = QDir(appDir).filePath("Updater.exe");
+
+    if (!QFile::exists(updaterPath)) {
+        QString currentDir = QDir::currentPath();
+        QString altUpdaterPath = QDir(currentDir).filePath("Updater.exe");
+        if (QFile::exists(altUpdaterPath)) {
+            appDir = currentDir;
+            updaterPath = altUpdaterPath;
+        }
+    }
+
+    if (!QFile::exists(updaterPath)) {
+        qDebug() << "Updater.exe not found at:" << updaterPath;
+        m_bottomStack->setCurrentIndex(0);
+        m_updateBtn->setText(LocalizationManager::instance().getString("Update", "update_now"));
+        return;
     }
 
     QStringList args;

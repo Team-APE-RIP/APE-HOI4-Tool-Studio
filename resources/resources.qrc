@@ -1,0 +1,31 @@
+<RCC>
+    <qresource prefix="/">
+        <file>app.ico</file>
+
+        <file>icons/palette.svg</file>
+        <file>icons/globe.svg</file>
+        <file>icons/sidebar.svg</file>
+        <file>icons/bug.svg</file>
+        <file>icons/pin.svg</file>
+        <file>icons/trash.svg</file>
+        <file>icons/broom.svg</file>
+        <file>icons/folder.svg</file>
+        <file>icons/folder-game.svg</file>
+        <file>icons/folder-doc.svg</file>
+        <file>icons/package.svg</file>
+        <file>icons/user.svg</file>
+        <file>icons/update-channel.svg</file>
+        <file>icons/toolbox.svg</file>
+        <file>icons/settings.svg</file>
+        <file>icons/eye.svg</file>
+        <file>icons/eye-off.svg</file>
+        <file>icons/search.svg</file>
+
+        <file>openSource.json</file>
+        <file>UserAgreement/version.json</file>
+        <file>UserAgreement/en_US.md</file>
+        <file>UserAgreement/zh_CN.md</file>
+        <file>UserAgreement/zh_TW.md</file>
+        <file>UserAgreement/ru_RU.md</file>
+    </qresource>
+</RCC>

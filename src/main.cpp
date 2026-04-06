@@ -23,8 +23,6 @@
 #include <QCoreApplication>
 #include <QDir>
 #include <QFile>
-#include <QJsonDocument>
-#include <QJsonObject>
 #include <QStandardPaths>
 
 int main(int argc, char* argv[]) {
@@ -88,22 +86,6 @@ int main(int argc, char* argv[]) {
     QString associationError;
     FileAssociationManager::registerFileAssociations(&associationError);
 
-    // Write current application path to path.json for Setup.exe
-    QString appDir = QDir::cleanPath(QCoreApplication::applicationDirPath());
-    const QString pathJsonDir =
-        QStandardPaths::writableLocation(QStandardPaths::TempLocation) + "/APE-HOI4-Tool-Studio";
-    QDir().mkpath(pathJsonDir);
-
-    QFile pathFile(pathJsonDir + "/path.json");
-    if (pathFile.open(QIODevice::WriteOnly)) {
-        QJsonObject pathObj;
-        pathObj["path"] = appDir;
-        pathObj["auto"] = "0";
-        const QJsonDocument pathDoc(pathObj);
-        pathFile.write(pathDoc.toJson());
-        pathFile.close();
-    }
-
     // Clean update cache if exists
     const QString updateCacheDir =
         QStandardPaths::writableLocation(QStandardPaths::TempLocation)
@@ -112,7 +94,6 @@ int main(int argc, char* argv[]) {
         QDir(updateCacheDir).removeRecursively();
     }
 
-    // Check for setup cache language
     const QString tempDir =
         QStandardPaths::writableLocation(QStandardPaths::TempLocation)
         + "/APE-HOI4-Tool-Studio/setup_cache";
@@ -121,21 +102,6 @@ int main(int argc, char* argv[]) {
     const QString setupCacheExe = tempDir + "/Setup.exe";
     if (QFile::exists(setupCacheExe)) {
         QFile::remove(setupCacheExe);
-    }
-
-    const QString tempLangFile = tempDir + "/temp_lang.json";
-    QFile tFile(tempLangFile);
-    if (tFile.exists() && tFile.open(QIODevice::ReadOnly)) {
-        const QJsonDocument doc = QJsonDocument::fromJson(tFile.readAll());
-        const QJsonObject obj = doc.object();
-        if (obj.contains("language")) {
-            const QString tempLang = obj["language"].toString();
-            if (tempLang == "English" || tempLang == "简体中文" || tempLang == "繁體中文") {
-                config.setLanguage(tempLang);
-            }
-        }
-        tFile.close();
-        QFile::remove(tempLangFile);
     }
 
     // Load language immediately

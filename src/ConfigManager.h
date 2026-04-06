@@ -10,9 +10,10 @@
 #define CONFIGMANAGER_H
 
 #include <QObject>
-#include <QString>
 #include <QJsonObject>
-#include <QDir>
+#include <QString>
+
+class QSettings;
 
 class ConfigManager : public QObject {
     Q_OBJECT
@@ -54,7 +55,7 @@ public:
     void setModPath(const QString& path);
     void clearModPath();
     void clearGamePath();
-    
+
     // Documents Settings
     QString getDocPath() const;
     void setDocPath(const QString& path);
@@ -62,10 +63,10 @@ public:
 
     bool isFirstRun() const;
     bool hasModSelected() const;
-    
+
     bool isSystemDarkTheme() const;
     bool isCurrentThemeDark() const;
-    
+
     // Style helpers for tools
     static QString getComboBoxItemStyle(bool isDark);
 
@@ -79,8 +80,12 @@ signals:
 
 private:
     ConfigManager();
-    QString getGlobalConfigPath() const;
-    QString getModConfigPath() const;
+
+    QSettings createSettings() const;
+    void loadDefaults();
+    void migrateLegacyConfigFiles();
+    void removeLegacyFile(const QString& filePath) const;
+    QString normalizeLanguageCode(const QString& value) const;
 
     QString m_gamePath;
     QString m_language;

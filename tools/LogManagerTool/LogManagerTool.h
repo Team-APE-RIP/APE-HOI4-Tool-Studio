@@ -214,10 +214,13 @@ private:
     void startCompareFileLoadAsync(const QString& displayName);
     void setLoadingState(bool loading, const QString& message = QString());
     void releaseAllLoadedLogs();
+    QString normalizeLanguageCode(const QString& lang) const;
+    QString localisationRootPath() const;
+    QMap<QString, QString> parseSimpleYamlFile(const QString& filePath) const;
 
     QMap<QString, QString> m_localizedNames;
     QMap<QString, QString> m_localizedDescs;
-    QJsonObject m_localizedStrings;
+    QMap<QString, QString> m_localizedStrings;
     QString m_currentLang;
 
     QString m_id;

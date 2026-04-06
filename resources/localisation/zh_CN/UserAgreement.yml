@@ -1,0 +1,8 @@
+l_zh_CN:
+  Title: "APE HOI4 Tool Studio 用户协议 (%1)"
+  Accept: "同意"
+  Reject: "拒绝"
+  Close: "关闭"
+  ScrollToBottomPrompt: "请先滚动到底部，完整阅读用户协议。"
+  WaitCountdownPrompt: "已阅读到底部，请等待 %1 秒后再同意。"
+  ReadyToAcceptPrompt: "已满足阅读要求，现在可以同意用户协议。"

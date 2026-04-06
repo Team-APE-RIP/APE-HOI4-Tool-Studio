@@ -1,0 +1,6 @@
+l_ru_RU:
+  Title: "Инструменты"
+  VersionMismatch: "Несоответствие версий!"
+  RequiresApp: "Требуется приложение v%1"
+  CurrentApp: "Текущее приложение v%2"
+  MismatchWarning: "Это может вызвать проблемы."

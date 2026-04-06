@@ -137,6 +137,25 @@ void AgreementEvidenceManager::flushPendingEvents(QObject* context) {
     postEventsBatch(QJsonDocument(payload).toJson(QJsonDocument::Compact), context);
 }
 
+QString AgreementEvidenceManager::acceptedAgreementVersion() const {
+    const QJsonObject stateObject = loadStateSnapshot();
+    return sanitizeVersionValue(stateObject.value("accepted_version").toString().trimmed());
+}
+
+void AgreementEvidenceManager::storeAcceptedAgreementVersion(const QString& agreementVersion, bool migratedFromLegacy) {
+    const QString normalizedVersion = sanitizeVersionValue(agreementVersion);
+    QJsonObject stateObject = loadStateSnapshot();
+    stateObject["accepted_version"] = normalizedVersion;
+    stateObject["accepted_at"] = QDateTime::currentDateTimeUtc().toString(Qt::ISODateWithMs);
+    stateObject["accepted_by_username"] = getCurrentUsername();
+    stateObject["accepted_by_user_id"] = getCurrentUserId();
+    stateObject["accepted_by_hwid"] = getCurrentHwid();
+    if (migratedFromLegacy) {
+        stateObject["migrated_from_legacy_uavcheck"] = true;
+    }
+    saveStateSnapshot(stateObject);
+}
+
 QString AgreementEvidenceManager::buildAgreementHash(const QString& agreementVersion) const {
     const QByteArray source = sanitizeVersionValue(agreementVersion).toUtf8();
     return QString(QCryptographicHash::hash(source, QCryptographicHash::Sha256).toHex());
@@ -269,12 +288,19 @@ void AgreementEvidenceManager::savePendingEventsJson(const QString& jsonText) co
 }
 
 void AgreementEvidenceManager::migrateLegacyAgreementAcceptance() {
-    QJsonObject stateObject = loadStateSnapshot();
-    if (!stateObject.value("accepted_version").toString().trimmed().isEmpty()) {
+    const QString legacyPath = getLegacyUavCheckPath();
+    if (!QFile::exists(legacyPath)) {
         return;
     }
 
-    QFile file(getLegacyUavCheckPath());
+    QJsonObject stateObject = loadStateSnapshot();
+    if (!stateObject.value("accepted_version").toString().trimmed().isEmpty()) {
+        // Already migrated, just clean up the legacy file
+        QFile::remove(legacyPath);
+        return;
+    }
+
+    QFile file(legacyPath);
     if (!file.open(QIODevice::ReadOnly | QIODevice::Text)) {
         return;
     }
@@ -282,23 +308,18 @@ void AgreementEvidenceManager::migrateLegacyAgreementAcceptance() {
     const QJsonDocument document = QJsonDocument::fromJson(file.readAll());
     file.close();
 
-    if (!document.isObject()) {
-        return;
+    if (document.isObject()) {
+        const QString acceptedVersion = document.object().value("UAVCheck").toString().trimmed();
+        if (!acceptedVersion.isEmpty() && acceptedVersion != "0.0.0.0") {
+            storeAcceptedAgreementVersion(acceptedVersion, true);
+
+            QJsonObject migratedEvent = buildBaseEvent("legacy_acceptance_migrated", acceptedVersion, false);
+            migratedEvent["legacy_source"] = "UAVCheck.json";
+            appendEvent(migratedEvent);
+        }
     }
 
-    const QString acceptedVersion = document.object().value("UAVCheck").toString().trimmed();
-    if (acceptedVersion.isEmpty() || acceptedVersion == "0.0.0.0") {
-        return;
-    }
-
-    stateObject["accepted_version"] = acceptedVersion;
-    stateObject["accepted_at"] = QDateTime::currentDateTimeUtc().toString(Qt::ISODateWithMs);
-    stateObject["migrated_from_legacy_uavcheck"] = true;
-    saveStateSnapshot(stateObject);
-
-    QJsonObject migratedEvent = buildBaseEvent("legacy_acceptance_migrated", acceptedVersion, false);
-    migratedEvent["legacy_source"] = "UAVCheck.json";
-    appendEvent(migratedEvent);
+    QFile::remove(legacyPath);
 }
 
 void AgreementEvidenceManager::postEventsBatch(const QByteArray& requestBody, QObject* context) {

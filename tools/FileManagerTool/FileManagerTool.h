@@ -30,8 +30,13 @@ public:
     void applyTheme() override;
 
 private:
+    QString normalizeLanguageCode(const QString& lang) const;
+    QString localisationRootPath() const;
+    QMap<QString, QString> parseSimpleYamlFile(const QString& filePath) const;
+
     QMap<QString, QString> m_localizedNames;
     QMap<QString, QString> m_localizedDescs;
+    QMap<QString, QString> m_localizedStrings;
     QString m_currentLang;
     QString m_toolPath; // Store path to find resources
 

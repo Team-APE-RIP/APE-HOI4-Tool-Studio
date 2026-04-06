@@ -394,14 +394,64 @@ void ToolProxyInterface::setMetaData(const QJsonObject& metaData) {
     m_infoLoaded = true;
 }
 
-// Helper function to convert display language name to language code
+static QMap<QString, QString> parseSimpleYamlFile(const QString& path) {
+    QMap<QString, QString> result;
+    QFile file(path);
+    if (!file.open(QIODevice::ReadOnly | QIODevice::Text)) {
+        return result;
+    }
+
+    QTextStream stream(&file);
+    bool insideRoot = false;
+
+    auto unquoteValue = [](QString value) {
+        value = value.trimmed();
+        if (value.size() >= 2 && value.startsWith('"') && value.endsWith('"')) {
+            value = value.mid(1, value.size() - 2);
+        }
+        value.replace(QStringLiteral("\\\""), QStringLiteral("\""));
+        value.replace(QStringLiteral("\\n"), QStringLiteral("\n"));
+        return value;
+    };
+
+    while (!stream.atEnd()) {
+        const QString rawLine = stream.readLine();
+        const QString trimmed = rawLine.trimmed();
+
+        if (trimmed.isEmpty() || trimmed.startsWith('#')) {
+            continue;
+        }
+
+        if (!insideRoot) {
+            if (trimmed.startsWith("l_") && trimmed.endsWith(':')) {
+                insideRoot = true;
+            }
+            continue;
+        }
+
+        if (!rawLine.startsWith(' ') && !rawLine.startsWith('\t')) {
+            continue;
+        }
+
+        const int separatorIndex = trimmed.indexOf(':');
+        if (separatorIndex <= 0) {
+            continue;
+        }
+
+        const QString key = trimmed.left(separatorIndex).trimmed();
+        const QString value = unquoteValue(trimmed.mid(separatorIndex + 1));
+        result.insert(key, value);
+    }
+
+    return result;
+}
+
 static QString languageNameToCode(const QString& langName) {
+    if (langName == "zh_CN" || langName == "zh_TW" || langName == "en_US") return langName;
     if (langName == "简体中文") return "zh_CN";
     if (langName == "繁體中文") return "zh_TW";
     if (langName == "English") return "en_US";
-    // If already a code, return as-is
-    if (langName == "zh_CN" || langName == "zh_TW" || langName == "en_US") return langName;
-    return "en_US"; // Default fallback
+    return "en_US";
 }
 
 void ToolProxyInterface::preloadInfo() {
@@ -419,25 +469,19 @@ void ToolProxyInterface::preloadInfo() {
     // Try to load localized name/description - use current language
     QString currentLang = ConfigManager::instance().getLanguage();
     QString langCode = languageNameToCode(currentLang);
-    QString locPath = m_toolDir + "/localization/" + langCode + ".json";
-    QFile locFile(locPath);
+    QString locPath = m_toolDir + "/localisation/" + langCode + "/strings.yml";
+    QMap<QString, QString> locObj = parseSimpleYamlFile(locPath);
 
-    // Fallback to en_US if current language file doesn't exist
-    if (!locFile.exists()) {
-        locPath = m_toolDir + "/localization/en_US.json";
-        locFile.setFileName(locPath);
+    if (locObj.isEmpty()) {
+        locPath = m_toolDir + "/localisation/en_US/strings.yml";
+        locObj = parseSimpleYamlFile(locPath);
     }
 
-    if (locFile.open(QIODevice::ReadOnly)) {
-        QJsonDocument locDoc = QJsonDocument::fromJson(locFile.readAll());
-        QJsonObject locObj = locDoc.object();
-        if (locObj.contains("Name")) {
-            m_toolInfo.name = locObj["Name"].toString();
-        }
-        if (locObj.contains("Description")) {
-            m_toolInfo.description = locObj["Description"].toString();
-        }
-        locFile.close();
+    if (locObj.contains("Name")) {
+        m_toolInfo.name = locObj.value("Name");
+    }
+    if (locObj.contains("Description")) {
+        m_toolInfo.description = locObj.value("Description");
     }
 
     Logger::instance().logInfo("ToolProxyInterface", "Preloaded info for tool: " + m_toolInfo.id + " with language: " + langCode);
@@ -907,35 +951,35 @@ void ToolProxyInterface::loadLanguage(const QString& lang) {
     QString langCode = languageNameToCode(lang);
     
     // Always update local cached info first
-    QString locPath = m_toolDir + "/localization/" + langCode + ".json";
-    QFile locFile(locPath);
-    
-    Logger::instance().logInfo("ToolProxyInterface", 
+    QString locPath = m_toolDir + "/localisation/" + langCode + "/strings.yml";
+    Logger::instance().logInfo("ToolProxyInterface",
         QString("loadLanguage called for %1, lang=%2, code=%3, path=%4").arg(m_toolInfo.id, lang, langCode, locPath));
-    
-    if (locFile.open(QIODevice::ReadOnly)) {
-        QJsonDocument locDoc = QJsonDocument::fromJson(locFile.readAll());
-        QJsonObject locObj = locDoc.object();
+
+    QMap<QString, QString> locObj = parseSimpleYamlFile(locPath);
+    if (locObj.isEmpty()) {
+        locPath = m_toolDir + "/localisation/en_US/strings.yml";
+        locObj = parseSimpleYamlFile(locPath);
+    }
+
+    if (!locObj.isEmpty()) {
         if (locObj.contains("Name")) {
-            m_toolInfo.name = locObj["Name"].toString();
-            Logger::instance().logInfo("ToolProxyInterface", 
+            m_toolInfo.name = locObj.value("Name");
+            Logger::instance().logInfo("ToolProxyInterface",
                 QString("Updated name to: %1").arg(m_toolInfo.name));
         }
         if (locObj.contains("Description")) {
-            m_toolInfo.description = locObj["Description"].toString();
-            Logger::instance().logInfo("ToolProxyInterface", 
+            m_toolInfo.description = locObj.value("Description");
+            Logger::instance().logInfo("ToolProxyInterface",
                 QString("Updated description to: %1").arg(m_toolInfo.description));
         }
-        locFile.close();
     } else {
-        Logger::instance().logWarning("ToolProxyInterface", 
-            QString("Failed to open localization file: %1").arg(locPath));
+        Logger::instance().logWarning("ToolProxyInterface",
+            QString("Failed to open localisation file: %1").arg(locPath));
     }
-    
-    // Send to subprocess if running
+
     if (isProcessRunning()) {
         QJsonObject payload;
-        payload["language"] = lang;
+        payload["language"] = langCode;
         sendMessage(ToolIpc::MessageType::LoadLanguage, payload);
     }
 }

@@ -1,0 +1,11 @@
+l_ru_RU:
+  GamePathInvalid: "Неверный каталог игры."
+  ModPathInvalid: "Неверный каталог мода."
+  PathNotExist: "Каталог не существует."
+  Hoi4NotFound: "hoi4.exe не найден."
+  ModNameInvalid: "Имя каталога не может быть 'mod'."
+  NoModFile: "Файл .mod не найден."
+  EmptyPaths: "Пожалуйста, выберите каталоги игры и мода."
+  DocFolderNameInvalid: "Выбранная папка должна называться 'Hearts of Iron IV'."
+  DocParentNotParadoxInteractive: "Родительский каталог должен содержать 'Paradox Interactive'."
+  DocPathInvalid: "Неверный каталог документов."

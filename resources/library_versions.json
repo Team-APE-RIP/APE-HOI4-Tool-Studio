@@ -1,0 +1,10 @@
+{
+  "core": "2.0.0",
+  "tool": "2.0.0",
+  "plugin": "2.0.0",
+  "logger": "2.0.0",
+  "config": "2.0.0",
+  "localization": "2.0.0",
+  "messageBox": "2.0.0",
+  "file": "2.0.0"
+}

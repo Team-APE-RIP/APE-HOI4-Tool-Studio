@@ -1,0 +1,87 @@
+[
+  {
+    "name": "Qt Framework",
+    "license": "LGPLv3",
+    "url": "https://www.qt.io/"
+  },
+  {
+    "name": "7-Zip",
+    "license": "7-Zip License",
+    "url": "https://www.7-zip.org/"
+  },
+  {
+    "name": "libcurl",
+    "license": "curl license",
+    "url": "https://curl.se/libcurl/"
+  },
+  {
+    "name": "Brotli",
+    "license": "MIT",
+    "url": "https://github.com/google/brotli"
+  },
+  {
+    "name": "OpenSSL",
+    "license": "Apache-2.0",
+    "url": "https://www.openssl.org/"
+  },
+  {
+    "name": "libiconv",
+    "license": "LGPLv2+",
+    "url": "https://www.gnu.org/software/libiconv/"
+  },
+  {
+    "name": "libidn2",
+    "license": "LGPLv3+",
+    "url": "https://www.gnu.org/software/libidn/#libidn2"
+  },
+  {
+    "name": "gettext-runtime (libintl)",
+    "license": "LGPLv2.1+",
+    "url": "https://www.gnu.org/software/gettext/"
+  },
+  {
+    "name": "nettle",
+    "license": "LGPLv3+",
+    "url": "https://www.lysator.liu.se/~nisse/nettle/"
+  },
+  {
+    "name": "nghttp2",
+    "license": "MIT",
+    "url": "https://github.com/nghttp2/nghttp2"
+  },
+  {
+    "name": "nghttp3",
+    "license": "MIT",
+    "url": "https://github.com/ngtcp2/nghttp3"
+  },
+  {
+    "name": "ngtcp2",
+    "license": "MIT",
+    "url": "https://github.com/ngtcp2/ngtcp2"
+  },
+  {
+    "name": "libpsl",
+    "license": "MIT",
+    "url": "https://github.com/rockdaboot/libpsl"
+  },
+  {
+    "name": "libssh2",
+    "license": "BSD-3-Clause",
+    "url": "https://libssh2.org/"
+  },
+  {
+    "name": "libunistring",
+    "license": "LGPLv3+",
+    "url": "https://www.gnu.org/software/libunistring/"
+  },
+  {
+    "name": "zstd",
+    "license": "BSD-3-Clause",
+    "url": "https://github.com/facebook/zstd"
+  },
+  {
+    "name": "zlib",
+    "license": "zlib License",
+    "url": "https://zlib.net/"
+  }
+]

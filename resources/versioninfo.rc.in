@@ -1,0 +1,34 @@
+#include <winver.h>
+
+VS_VERSION_INFO VERSIONINFO
+ FILEVERSION @APE_RC_FILE_VERSION@
+ PRODUCTVERSION @APE_RC_PRODUCT_VERSION@
+ FILEFLAGSMASK 0x3fL
+#ifdef _DEBUG
+ FILEFLAGS 0x1L
+#else
+ FILEFLAGS 0x0L
+#endif
+ FILEOS 0x40004L
+ FILETYPE @APE_RC_FILE_TYPE@
+ FILESUBTYPE 0x0L
+BEGIN
+    BLOCK "StringFileInfo"
+    BEGIN
+        BLOCK "000004b0"
+        BEGIN
+            VALUE "CompanyName", "@APE_RC_COMPANY@"
+            VALUE "FileDescription", "@APE_RC_FILE_DESCRIPTION@"
+            VALUE "FileVersion", "@APE_RC_FILE_VERSION_STR@"
+            VALUE "InternalName", "@APE_RC_INTERNAL_NAME@"
+            VALUE "LegalCopyright", "@APE_RC_COPYRIGHT@"
+            VALUE "OriginalFilename", "@APE_RC_ORIGINAL_FILENAME@"
+            VALUE "ProductName", "@APE_RC_PRODUCT_NAME@"
+            VALUE "ProductVersion", "@APE_RC_PRODUCT_VERSION_STR@"
+        END
+    END
+    BLOCK "VarFileInfo"
+    BEGIN
+        VALUE "Translation", 0x0000, 1200
+    END
+END

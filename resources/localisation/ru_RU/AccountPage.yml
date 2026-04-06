@@ -1,0 +1,13 @@
+l_ru_RU:
+  AccountTitle: "Аккаунт"
+  Group_AccountInfo: "Информация об аккаунте"
+  UserInfo_Title: "Текущий пользователь"
+  UpdateChannel_Title: "Канал обновлений"
+  LogoutBtn: "Выйти"
+  NotLoggedIn: "Не в сети"
+  channel.stable.name: "Стабильный"
+  channel.stable.description: "Стабильный канал обновлений"
+  channel.alpha.name: "Альфа"
+  channel.alpha.description: "Экспериментальный канал обновлений"
+  channel.beta.name: "Бета"
+  channel.beta.description: "Канал предварительных обновлений"

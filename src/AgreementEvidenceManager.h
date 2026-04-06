@@ -27,6 +27,9 @@ public:
     void recordRejected(const QString& agreementVersion, bool isSettingsMode);
     void recordClosedFromSettings(const QString& agreementVersion);
 
+    QString acceptedAgreementVersion() const;
+    void storeAcceptedAgreementVersion(const QString& agreementVersion, bool migratedFromLegacy = false);
+
     void flushPendingEvents(QObject* context = nullptr);
 
 private:

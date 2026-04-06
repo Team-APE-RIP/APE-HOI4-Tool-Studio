@@ -189,7 +189,7 @@ void FileTreeWidget::buildTree() {
 
     for (const QString& relPath : paths) {
         const FileDetails details = files[relPath];
-        const QString source = details.source;
+        const QString source = details.sourceString();
         
         QStringList parts = relPath.split('/');
         QString currentPath = "";

@@ -1,0 +1,16 @@
+<!DOCTYPE RCC><RCC version="1.0">
+<qresource>
+    <file alias="app.ico">app.ico</file>
+    <file alias="data/payload.7z">../bin/cache/payload.7z</file>
+    <file alias="data/7z.exe">../bin/cache/7z.exe</file>
+    <file alias="data/7z.dll">../bin/cache/7z.dll</file>
+    <file alias="localisation/en_US/meta.htsl">../setup/localisation/en_US/meta.htsl</file>
+    <file alias="localisation/en_US/strings.yml">../setup/localisation/en_US/strings.yml</file>
+    <file alias="localisation/zh_CN/meta.htsl">../setup/localisation/zh_CN/meta.htsl</file>
+    <file alias="localisation/zh_CN/strings.yml">../setup/localisation/zh_CN/strings.yml</file>
+    <file alias="localisation/zh_TW/meta.htsl">../setup/localisation/zh_TW/meta.htsl</file>
+    <file alias="localisation/zh_TW/strings.yml">../setup/localisation/zh_TW/strings.yml</file>
+    <file alias="localisation/ru_RU/meta.htsl">../setup/localisation/ru_RU/meta.htsl</file>
+    <file alias="localisation/ru_RU/strings.yml">../setup/localisation/ru_RU/strings.yml</file>
+</qresource>
+</RCC>
