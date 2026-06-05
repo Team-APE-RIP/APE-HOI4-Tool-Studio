@@ -45,7 +45,7 @@ public:
     static AuthManager& instance();
 
     void init();
-    void login(const QString& username, const QString& password);
+    void login(const QString& username, const QString& password, bool persistCredentials = true);
     bool hasSavedCredentials() const;
     void autoLogin();
     bool isAuthenticated() const;
@@ -124,6 +124,7 @@ private:
     AccountActionInfo m_accountActionInfo;
     bool m_isAuthenticated;
     bool m_isLoggingIn;
+    bool m_persistCredentialsForCurrentLogin;
 
     bool m_isConnected;
     bool m_connectionWarningActive;

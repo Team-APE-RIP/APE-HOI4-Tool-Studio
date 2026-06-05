@@ -8,9 +8,12 @@
 //-------------------------------------------------------------------------------------
 #include "PathValidator.h"
 #include "ConfigManager.h"
+#include "GamePathDiscovery.h"
 #include "Logger.h"
 #include <QDir>
 #include <QFileInfo>
+#include <QList>
+#include <QPair>
 #include <QDebug>
 
 PathValidator& PathValidator::instance() {
@@ -42,12 +45,49 @@ QString PathValidator::validateGamePath(const QString& path) {
         return "PathNotExist";
     }
     
-    if (!dir.exists("hoi4.exe")) {
+    if (!dir.exists(QStringLiteral("hoi4.exe"))) {
         Logger::instance().logError("PathValidator", "hoi4.exe not found in: " + path);
         return "Hoi4NotFound";
     }
+
+    const QList<QPair<QString, QString>> requiredDirs = {
+        {QStringLiteral("common"), QStringLiteral("GameCommonDirMissing")},
+        {QStringLiteral("history"), QStringLiteral("GameHistoryDirMissing")},
+        {QStringLiteral("events"), QStringLiteral("GameEventsDirMissing")},
+        {QStringLiteral("localisation"), QStringLiteral("GameLocalisationDirMissing")},
+        {QStringLiteral("map"), QStringLiteral("GameMapDirMissing")}
+    };
+
+    for (const auto& requiredDir : requiredDirs) {
+        if (!QFileInfo(dir.filePath(requiredDir.first)).isDir()) {
+            Logger::instance().logError("PathValidator", "Required game directory missing: " + requiredDir.first + " in " + path);
+            return requiredDir.second;
+        }
+    }
     
     return "";
+}
+
+QString PathValidator::ensureGamePathDiscovered() {
+    ConfigManager& config = ConfigManager::instance();
+
+    const QString cachedPath = config.getGamePath().trimmed();
+    if (!cachedPath.isEmpty() && validateGamePath(cachedPath).isEmpty()) {
+        return cachedPath;
+    }
+
+    if (!cachedPath.isEmpty()) {
+        Logger::instance().logWarning("PathValidator", "Cached game path is invalid, rediscovering: " + cachedPath);
+        config.clearGamePath();
+    }
+
+    const QString discoveredPath = GamePathDiscovery::findGamePath();
+    if (discoveredPath.isEmpty()) {
+        return QString();
+    }
+
+    config.setGamePath(discoveredPath);
+    return discoveredPath;
 }
 
 QString PathValidator::validateModPath(const QString& path) {
@@ -109,7 +149,9 @@ void PathValidator::checkPaths() {
     if (!gamePath.isEmpty()) {
         QString error = validateGamePath(gamePath);
         if (!error.isEmpty()) {
-            emit pathInvalid("GamePathInvalid", error);
+            if (ensureGamePathDiscovered().isEmpty()) {
+                emit pathInvalid("GamePathInvalid", error);
+            }
             // Stop monitoring to avoid spamming dialogs
             stopMonitoring();
             return;

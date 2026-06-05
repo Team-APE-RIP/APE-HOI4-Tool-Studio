@@ -7,10 +7,10 @@
 // https://github.com/Team-APE-RIP/APE-HOI4-Tool-Studio/
 //-------------------------------------------------------------------------------------
 #include "MainWindow.h"
+#include "ApiRequests.h"
 #include "SetupDialog.h"
 #include "ConfigManager.h"
 #include "LocalizationManager.h"
-#include "ToolHostMode.h"
 #include "AuthManager.h"
 #include "LoginDialog.h"
 #include "HttpClient.h"
@@ -18,37 +18,65 @@
 #include "ExternalPackageManager.h"
 #include "SingleInstanceManager.h"
 #include "RuntimeContextConfigurator.h"
+#include "StartupSplashScreen.h"
+#include "PackageRegistry.h"
+#include "Logger.h"
 
 #include <QApplication>
 #include <QCoreApplication>
 #include <QDir>
 #include <QFile>
 #include <QStandardPaths>
+#include <QSysInfo>
+
+#ifdef Q_OS_WIN
+extern "C" {
+__declspec(dllexport) unsigned long NvOptimusEnablement = 0x00000001;
+__declspec(dllexport) int AmdPowerXpressRequestHighPerformance = 1;
+}
+#endif
+
+namespace {
+
+QString qtRuntimeCacheRootPath() {
+    return QDir::cleanPath(QDir::temp().filePath(QStringLiteral("APE-HOI4-Tool-Studio/cache")));
+}
+
+QString qtPipelineCacheFilePath(const QString& cacheRootPath) {
+    const QString buildAbi = QSysInfo::buildAbi().trimmed().isEmpty()
+        ? QStringLiteral("default")
+        : QSysInfo::buildAbi().trimmed();
+    return QDir(cacheRootPath).filePath(QStringLiteral("qtpipelinecache-%1").arg(buildAbi));
+}
+
+QByteArray nativeUtf8Path(const QString& path) {
+    return QDir::toNativeSeparators(path).toUtf8();
+}
+
+void configureQtRuntimeCachePaths() {
+    const QString cacheRootPath = qtRuntimeCacheRootPath();
+    QDir().mkpath(cacheRootPath);
+
+    qputenv("QML_DISK_CACHE_PATH", nativeUtf8Path(cacheRootPath));
+
+    const QString pipelineCacheFilePath = qtPipelineCacheFilePath(cacheRootPath);
+    qputenv("QSG_RHI_PIPELINE_CACHE_LOAD", nativeUtf8Path(pipelineCacheFilePath));
+    qputenv("QSG_RHI_PIPELINE_CACHE_SAVE", nativeUtf8Path(pipelineCacheFilePath));
+}
+
+} // namespace
 
 int main(int argc, char* argv[]) {
+    configureQtRuntimeCachePaths();
+
     QApplication a(argc, argv);
 
     // Set application metadata
     a.setApplicationName("APE HOI4 Tool Studio");
-    a.setOrganizationName("Team APE-RIP");
+    a.setOrganizationName("Team-APE-RIP");
     a.setApplicationVersion("1.0.0");
 
-    // Check for tool host mode: --tool-host <server_name> <tool_dll_path> [tool_name] [--log-file <path>]
     const QStringList args = a.arguments();
-    if (args.size() >= 4 && args[1] == "--tool-host") {
-        const QString toolName = args.size() >= 5 ? args[4] : "Tool";
-        QString logFilePath;
-
-        const int logFileIndex = args.indexOf("--log-file");
-        if (logFileIndex != -1 && logFileIndex + 1 < args.size()) {
-            logFilePath = args[logFileIndex + 1];
-        }
-
-        a.setApplicationName(toolName);
-        a.setQuitOnLastWindowClosed(false);
-        return runToolHostMode(args[2], args[3], toolName, logFilePath);
-    }
-
     ExternalPackageManager::PendingRequest pendingRequest;
     if (args.size() >= 2) {
         const QString possiblePath = args[1].trimmed();
@@ -63,6 +91,10 @@ int main(int argc, char* argv[]) {
         return 0;
     }
 
+    StartupSplashScreen splash;
+    splash.showSplash();
+    splash.setProgress(0.08, StartupSplashStage::CheckingInstance);
+
     QString ipcError;
     singleInstanceManager.startListening(&ipcError);
 
@@ -71,22 +103,41 @@ int main(int argc, char* argv[]) {
     }
 
     // Normal mode: run main application
+    splash.setProgress(0.16, StartupSplashStage::PreparingRuntime);
     ConfigManager& config = ConfigManager::instance();
+
+    // Load language before the remaining startup work so splash status text can
+    // follow the same dynamic localisation path as the rest of the application.
+    splash.setProgress(0.22, StartupSplashStage::LoadingLanguage);
+    LocalizationManager::instance().loadLanguage(config.getLanguage());
+    splash.applyLocalizedStrings();
+
+    splash.setProgress(0.30, StartupSplashStage::ConfiguringRuntime);
     configureToolRuntimeContext();
     configurePluginRuntimeContext();
 
+    splash.setProgress(0.36, StartupSplashStage::OrganizingPackages);
+    QString packageSyncError;
+    if (!PackageRegistry::synchronizeInstalledPackages(QCoreApplication::applicationDirPath(), &packageSyncError)) {
+        Logger::instance().logWarning("Startup", "Package registry synchronization failed: " + packageSyncError);
+    }
+
+    splash.setProgress(0.40, StartupSplashStage::RefreshingSecurityBundle);
     HttpClient::instance().refreshCaBundleInBackground(
-        QUrl(AuthManager::buildApiUrl("/api/v1/security/ca-bundle/meta")),
-        QUrl(AuthManager::buildApiUrl("/api/v1/security/ca-bundle"))
+        ApiRequests::caBundleMetadataUrl(),
+        ApiRequests::caBundleDownloadUrl()
     );
 
     // Initialize AuthManager (loads saved credentials and auto-logs in if available)
+    splash.setProgress(0.50, StartupSplashStage::PreparingAccountSession);
     AuthManager::instance().init();
 
+    splash.setProgress(0.60, StartupSplashStage::RegisteringFileAssociations);
     QString associationError;
     FileAssociationManager::registerFileAssociations(&associationError);
 
     // Clean update cache if exists
+    splash.setProgress(0.70, StartupSplashStage::CleaningCaches);
     const QString updateCacheDir =
         QStandardPaths::writableLocation(QStandardPaths::TempLocation)
         + "/APE-HOI4-Tool-Studio/update_cache";
@@ -104,9 +155,7 @@ int main(int argc, char* argv[]) {
         QFile::remove(setupCacheExe);
     }
 
-    // Load language immediately
-    LocalizationManager::instance().loadLanguage(config.getLanguage());
-
+    splash.setProgress(0.82, StartupSplashStage::BuildingMainWindow);
     MainWindow w(pendingRequest);
     QObject::connect(
         &singleInstanceManager,
@@ -128,6 +177,8 @@ int main(int argc, char* argv[]) {
     );
 
     w.show();
+    splash.setProgress(0.96, StartupSplashStage::OpeningMainWindow);
+    splash.finishWithMainWindow(&w);
 
     return a.exec();
 }

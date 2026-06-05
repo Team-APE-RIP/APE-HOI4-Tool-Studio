@@ -22,6 +22,7 @@ struct PluginInfo {
     QString libraryPath;
     QString descriptorPath;
     QString licensePath;
+    bool official = false;
 
     bool isValid() const {
         return !id.isEmpty() && !name.isEmpty() && !directoryPath.isEmpty() && !descriptorPath.isEmpty();

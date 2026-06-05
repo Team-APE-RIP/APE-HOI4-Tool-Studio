@@ -9,11 +9,11 @@
 #include "CustomMessageBox.h"
 #include "ConfigManager.h"
 #include "LocalizationManager.h"
+#include "OverlayAcrylicMaterial.h"
 #include <QVBoxLayout>
 #include <QHBoxLayout>
 #include <QStyle>
 #include <QPainter>
-#include <QPainterPath>
 
 CustomMessageBox::CustomMessageBox(QWidget *parent, const QString &title, const QString &message, Type type)
     : QDialog(parent)
@@ -21,6 +21,7 @@ CustomMessageBox::CustomMessageBox(QWidget *parent, const QString &title, const 
     setWindowFlags(Qt::FramelessWindowHint | Qt::Dialog);
     setAttribute(Qt::WA_TranslucentBackground);
     setWindowModality(Qt::WindowModal);
+    OverlayAcrylicMaterial::installLiveRefresh(this);
     setupUi(title, message, type);
     
     // Theme will be handled in paintEvent and setStyleSheet for children
@@ -30,13 +31,13 @@ CustomMessageBox::CustomMessageBox(QWidget *parent, const QString &title, const 
     setStyleSheet(QString(R"(
         QLabel { color: %1; }
         QPushButton {
-            background-color: #007AFF; color: white; border: none; border-radius: 6px; padding: 8px 16px; font-weight: bold;
+            background-color: transparent; color: white; border: none; padding: 8px 16px; font-weight: bold;
         }
-        QPushButton:hover { background-color: #0062CC; }
+        QPushButton:hover { background-color: transparent; }
         QPushButton#CancelBtn {
-            background-color: %2; color: %1; border: 1px solid %3;
+            background-color: transparent; color: %1; border: none;
         }
-        QPushButton#CancelBtn:hover { background-color: %4; }
+        QPushButton#CancelBtn:hover { background-color: transparent; }
     )").arg(text, isDark ? "#3A3A3C" : "#F5F5F7", isDark ? "#48484A" : "#D2D2D7", isDark ? "#48484A" : "#E5E5EA"));
 }
 
@@ -45,16 +46,13 @@ void CustomMessageBox::paintEvent(QPaintEvent *event) {
     QPainter painter(this);
     painter.setRenderHint(QPainter::Antialiasing);
 
-    bool isDark = ConfigManager::instance().isCurrentThemeDark();
-    QColor bg = isDark ? QColor("#2C2C2E") : QColor("#FFFFFF");
-    QColor border = isDark ? QColor("#3A3A3C") : QColor("#D2D2D7");
-
-    QPainterPath path;
-    path.addRoundedRect(rect(), 10, 10);
-    
-    painter.fillPath(path, bg);
-    painter.setPen(QPen(border, 1));
-    painter.drawPath(path);
+    OverlayAcrylicMaterial::paintPanel(
+        painter,
+        this,
+        QRectF(rect()),
+        10.0,
+        ConfigManager::instance().isCurrentThemeDark(),
+        true);
 }
 
 void CustomMessageBox::setupUi(const QString &title, const QString &message, Type type) {
@@ -77,22 +75,31 @@ void CustomMessageBox::setupUi(const QString &title, const QString &message, Typ
     LocalizationManager& loc = LocalizationManager::instance();
 
     if (type == Question) {
-        QPushButton *cancelBtn = new QPushButton(loc.getString("Common", "Cancel"));
+        QPushButton *cancelBtn = new OverlayAcrylicButton(OverlayAcrylicButton::Role::Secondary, this);
+        cancelBtn->setText(loc.getString("Common", "Cancel"));
         cancelBtn->setObjectName("CancelBtn");
+        cancelBtn->setCursor(Qt::PointingHandCursor);
+        cancelBtn->setMinimumHeight(32);
         connect(cancelBtn, &QPushButton::clicked, [this](){ 
             m_result = QMessageBox::No; 
             reject(); 
         });
         btnLayout->addWidget(cancelBtn);
 
-        QPushButton *yesBtn = new QPushButton(loc.getString("Common", "Yes"));
+        QPushButton *yesBtn = new OverlayAcrylicButton(OverlayAcrylicButton::Role::Accent, this);
+        yesBtn->setText(loc.getString("Common", "Yes"));
+        yesBtn->setCursor(Qt::PointingHandCursor);
+        yesBtn->setMinimumHeight(32);
         connect(yesBtn, &QPushButton::clicked, [this](){ 
             m_result = QMessageBox::Yes; 
             accept(); 
         });
         btnLayout->addWidget(yesBtn);
     } else {
-        QPushButton *okBtn = new QPushButton(loc.getString("Common", "OK"));
+        QPushButton *okBtn = new OverlayAcrylicButton(OverlayAcrylicButton::Role::Accent, this);
+        okBtn->setText(loc.getString("Common", "OK"));
+        okBtn->setCursor(Qt::PointingHandCursor);
+        okBtn->setMinimumHeight(32);
         connect(okBtn, &QPushButton::clicked, [this](){ 
             m_result = QMessageBox::Ok; 
             accept(); 

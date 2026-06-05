@@ -8,10 +8,12 @@
 //-------------------------------------------------------------------------------------
 #include "Advertisement.h"
 
+#include "ApiRequests.h"
 #include "AuthManager.h"
 #include "ConfigManager.h"
 #include "LocalizationManager.h"
 #include "Logger.h"
+#include "OverlayAcrylicMaterial.h"
 
 #include <QDesktopServices>
 #include <QEvent>
@@ -26,9 +28,10 @@ Advertisement::Advertisement(QWidget* parent)
     : QWidget(parent)
     , m_countdownSeconds(5) {
     setAttribute(Qt::WA_TranslucentBackground);
+    OverlayAcrylicMaterial::installLiveRefresh(this);
     hide();
 
-    m_container = new QWidget(this);
+    m_container = new OverlayAcrylicPanel(this);
     m_container->setObjectName("adContainer");
 
     QVBoxLayout* layout = new QVBoxLayout(m_container);
@@ -46,7 +49,7 @@ Advertisement::Advertisement(QWidget* parent)
     m_imageLabel->setMinimumSize(400, 300);
     m_imageLabel->installEventFilter(this);
 
-    m_closeButton = new QPushButton(m_container);
+    m_closeButton = new OverlayAcrylicButton(OverlayAcrylicButton::Role::Accent, m_container);
     m_closeButton->setObjectName("adCloseButton");
     m_closeButton->setMinimumHeight(40);
     m_closeButton->setCursor(Qt::PointingHandCursor);
@@ -100,12 +103,7 @@ void Advertisement::showAdWithData(const QString& text, const QString& imageUrl,
         return;
     }
 
-    QString fullImageUrl = imageUrl;
-    if (imageUrl.startsWith("/ads/")) {
-        fullImageUrl = AuthManager::getApiBaseUrl() + imageUrl;
-    }
-
-    HttpRequestOptions options = HttpClient::createGet(QUrl(fullImageUrl));
+    HttpRequestOptions options = HttpClient::createGet(ApiRequests::advertisementImageUrl(imageUrl));
     options.category = HttpRequestCategory::AdvertisementImage;
     options.timeoutMs = 90000;
     options.connectTimeoutMs = 8000;
@@ -163,20 +161,10 @@ void Advertisement::fetchAdData(bool forDisplay) {
         m_displayWhenPrepared = true;
     }
 
-    HttpRequestOptions options = HttpClient::createGet(QUrl(AuthManager::getApiBaseUrl() + "/api/v1/ads/current"));
-    options.category = HttpRequestCategory::Manifest;
-    options.timeoutMs = 20000;
-    options.connectTimeoutMs = 10000;
-    options.maxRetries = 2;
-    options.retryOnHttp5xx = true;
-    options.allowHttp11Fallback = true;
-    options.allowIpv4Fallback = true;
-    options.backendPreference = HttpBackendPreference::Libcurl;
+    HttpRequestOptions options = ApiRequests::createCurrentAdvertisementRequest();
 
     const QString token = AuthManager::instance().getToken();
-    if (!token.isEmpty()) {
-        HttpClient::addOrReplaceHeader(options, "Authorization", QString("Bearer %1").arg(token).toUtf8());
-    }
+    ApiRequests::applyBearerAuthorization(options, token);
 
     HttpClient::instance().send(options, this, [this](const HttpResponse& response) {
         onAdDataReceived(response);
@@ -291,40 +279,32 @@ void Advertisement::onImageClicked() {
 void Advertisement::updateTheme() {
     const bool isDark = ConfigManager::instance().isCurrentThemeDark();
 
-    const QString containerBg = isDark ? "#2d2d2d" : "#ffffff";
     const QString textColor = isDark ? "#ffffff" : "#333333";
-    const QString borderColor = isDark ? "#3d3d3d" : "#e0e0e0";
-    const QString btnBg = isDark ? "#007acc" : "#0078d7";
-    const QString btnBgHover = isDark ? "#0098ff" : "#1084d8";
-    const QString btnDisabledBg = isDark ? "#555555" : "#cccccc";
 
     setStyleSheet(QString(
         "#adContainer {"
-        "   background-color: %1;"
-        "   border: 1px solid %2;"
-        "   border-radius: 10px;"
+        "   background-color: transparent;"
+        "   border: none;"
         "}"
         "#adTitle {"
-        "   color: %3;"
+        "   color: %1;"
         "   font-size: 18px;"
         "   font-weight: bold;"
         "}"
         "#adCloseButton {"
-        "   background-color: %4;"
+        "   background-color: transparent;"
         "   color: white;"
         "   border: none;"
-        "   border-radius: 5px;"
         "   font-size: 14px;"
         "   font-weight: bold;"
         "}"
         "#adCloseButton:hover:!disabled {"
-        "   background-color: %5;"
+        "   background-color: transparent;"
         "}"
         "#adCloseButton:disabled {"
-        "   background-color: %6;"
-        "   color: #888888;"
+        "   background-color: transparent;"
         "}"
-    ).arg(containerBg, borderColor, textColor, btnBg, btnBgHover, btnDisabledBg));
+    ).arg(textColor));
 }
 
 void Advertisement::paintEvent(QPaintEvent* event) {
@@ -333,12 +313,13 @@ void Advertisement::paintEvent(QPaintEvent* event) {
     QPainter painter(this);
     painter.setRenderHint(QPainter::Antialiasing);
 
-    QPainterPath path;
-    const QRectF r = rect();
-    const qreal radius = 9;
-
-    path.addRoundedRect(r, radius, radius);
-    painter.fillPath(path, QColor(0, 0, 0, 120));
+    OverlayAcrylicMaterial::paintOverlayBackdrop(
+        painter,
+        this,
+        QRectF(rect()),
+        9.0,
+        ConfigManager::instance().isCurrentThemeDark(),
+        124);
 }
 
 bool Advertisement::eventFilter(QObject* obj, QEvent* event) {

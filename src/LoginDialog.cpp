@@ -7,9 +7,11 @@
 // https://github.com/Team-APE-RIP/APE-HOI4-Tool-Studio/
 //-------------------------------------------------------------------------------------
 #include "LoginDialog.h"
+#include "ApiRequests.h"
 #include "AuthManager.h"
 #include "ConfigManager.h"
 #include "LocalizationManager.h"
+#include "OverlayAcrylicMaterial.h"
 #include "SslConfig.h"
 #include <QPainter>
 #include <QPainterPath>
@@ -245,6 +247,7 @@ LoginDialog::LoginDialog(QWidget *parent)
 {
     setAttribute(Qt::WA_TransparentForMouseEvents, false);
     setAttribute(Qt::WA_TranslucentBackground);
+    OverlayAcrylicMaterial::installLiveRefresh(this);
 
     setupUi();
     updateTheme();
@@ -268,7 +271,7 @@ LoginDialog::~LoginDialog() {
 }
 
 void LoginDialog::setupUi() {
-    m_container = new QWidget(this);
+    m_container = new OverlayAcrylicPanel(this);
     m_container->setObjectName("LoginContainer");
     m_container->setFixedSize(400, 380);
     
@@ -321,7 +324,7 @@ void LoginDialog::setupUi() {
     m_togglePasswordBtn->setFixedSize(30, 30);
     connect(m_togglePasswordBtn, &QToolButton::clicked, this, &LoginDialog::onTogglePasswordVisibility);
 
-    m_actionBtn = new QPushButton(m_formPage);
+    m_actionBtn = new OverlayAcrylicButton(OverlayAcrylicButton::Role::Accent, m_formPage);
     m_actionBtn->setObjectName("LoginBtn");
     m_actionBtn->setMinimumHeight(40);
     m_actionBtn->setCursor(Qt::PointingHandCursor);
@@ -472,51 +475,51 @@ void LoginDialog::onTogglePasswordVisibility() {
 void LoginDialog::updateTheme() {
     bool isDark = ConfigManager::instance().isCurrentThemeDark();
     
-    QString containerBg = isDark ? "#2C2C2E" : "#FFFFFF";
     QString textColor = isDark ? "#FFFFFF" : "#1D1D1F";
     QString secondaryTextColor = isDark ? "#8E8E93" : "#86868B";
-    QString inputBg = isDark ? "#1C1C1E" : "#F2F2F7";
+    QString inputBg = isDark ? "rgba(28, 28, 30, 0.56)" : "rgba(255, 255, 255, 0.50)";
     QString inputBorder = isDark ? "#3A3A3C" : "#E5E5EA";
-    QString btnBg = "#007AFF";
-    QString btnHoverBg = "#0062CC";
-    QString progressBg = isDark ? "#3A3A3C" : "#E5E5EA";
-    QString progressChunk = "#007AFF";
+    QString accentColor = isDark ? "#0A84FF" : "#007AFF";
+    QString accentGlass = OverlayAcrylicMaterial::accentGlassBrush(isDark);
+    QString progressBg = isDark ? "rgba(58, 58, 60, 0.58)" : "rgba(229, 229, 234, 0.68)";
+    QString progressChunk = accentGlass;
     
     setStyleSheet(QString(
         "QWidget#LoginContainer {"
-        "  background-color: %1;"
-        "  border-radius: 12px;"
+        "  background-color: transparent;"
+        "  border: none;"
         "}"
         "QLabel#LoginTitle {"
-        "  color: %2;"
+        "  color: %1;"
         "}"
         "QLabel#LoginSubtitle {"
-        "  color: %3;"
+        "  color: %2;"
         "}"
         "QLineEdit#LoginInput {"
-        "  background-color: %4;"
-        "  color: %2;"
-        "  border: 1px solid %5;"
+        "  background-color: %3;"
+        "  color: %1;"
+        "  border: 1px solid %4;"
         "  border-radius: 6px;"
         "  font-size: 14px;"
         "  font-family: monospace;"
+        "  selection-background-color: %5;"
+        "  selection-color: #FFFFFF;"
         "}"
         "QLineEdit#LoginInput:focus {"
         "  border: 1px solid %6;"
         "}"
         "QPushButton#LoginBtn {"
-        "  background-color: %6;"
+        "  background-color: transparent;"
         "  color: #FFFFFF;"
         "  border: none;"
-        "  border-radius: 6px;"
         "  font-weight: bold;"
         "  font-size: 14px;"
         "}"
         "QPushButton#LoginBtn:hover {"
-        "  background-color: %7;"
+        "  background-color: transparent;"
         "}"
         "QPushButton#LoginBtn:disabled {"
-        "  background-color: %3;"
+        "  background-color: transparent;"
         "}"
         "QPushButton#ToggleModeBtn {"
         "  color: %6;"
@@ -532,20 +535,20 @@ void LoginDialog::updateTheme() {
         "  font-weight: 500;"
         "}"
         "QLabel#LoadingMessage {"
-        "  color: %2;"
+        "  color: %1;"
         "  font-size: 14px;"
         "  font-weight: 500;"
         "}"
         "QProgressBar#LoadingProgressBar {"
-        "  background-color: %8;"
+        "  background-color: %7;"
         "  border: none;"
         "  border-radius: 3px;"
         "}"
         "QProgressBar#LoadingProgressBar::chunk {"
-        "  background-color: %9;"
+        "  background-color: %8;"
         "  border-radius: 3px;"
         "}"
-    ).arg(containerBg, textColor, secondaryTextColor, inputBg, inputBorder, btnBg, btnHoverBg, progressBg, progressChunk));
+    ).arg(textColor, secondaryTextColor, inputBg, inputBorder, accentGlass, accentColor, progressBg, progressChunk));
 }
 
 void LoginDialog::onLoginClicked() {
@@ -590,20 +593,9 @@ void LoginDialog::onRegisterClicked() {
     json["password"] = password;
     json["hwid"] = AuthManager::instance().getHWID();
 
-    HttpRequestOptions options = HttpClient::createJsonPost(
-        QUrl(AuthManager::buildApiUrl("/api/v1/auth/register")),
+    HttpRequestOptions options = ApiRequests::createRegisterRequest(
         QJsonDocument(json).toJson(QJsonDocument::Compact)
     );
-    HttpClient::addOrReplaceHeader(options, "User-Agent", "Mozilla/5.0 (Windows NT 10.0; Win64; x64) APEHOI4ToolStudio/1.0");
-    HttpClient::addOrReplaceHeader(options, "Accept", "application/json, text/plain, */*");
-    HttpClient::addOrReplaceHeader(options, "Accept-Language", "zh-CN,zh;q=0.9,en;q=0.8");
-    options.category = HttpRequestCategory::Auth;
-    options.timeoutMs = 20000;
-    options.connectTimeoutMs = 5000;
-    options.maxRetries = 1;
-    options.retryOnHttp5xx = true;
-    options.allowHttp11Fallback = true;
-    options.allowIpv4Fallback = true;
 
     HttpClient::instance().send(options, this, [this](const HttpResponse& response) {
         onRegisterReply(response);
@@ -702,14 +694,14 @@ void LoginDialog::paintEvent(QPaintEvent *event) {
     QPainter painter(this);
     painter.setRenderHint(QPainter::Antialiasing);
     
-    QPainterPath path;
-    QRectF r = rect();
-    qreal radius = 9;
-    
-    path.addRoundedRect(r, radius, radius);
-    
     int alpha = (m_stackedWidget->currentWidget() == m_loadingPage) ? 120 : 150;
-    painter.fillPath(path, QColor(0, 0, 0, alpha));
+    OverlayAcrylicMaterial::paintOverlayBackdrop(
+        painter,
+        this,
+        QRectF(rect()),
+        9.0,
+        ConfigManager::instance().isCurrentThemeDark(),
+        alpha);
 }
 
 bool LoginDialog::eventFilter(QObject *obj, QEvent *event) {

@@ -4,3 +4,8 @@ l_zh_CN:
   RequiresApp: "需要主程序 v%1"
   CurrentApp: "当前主程序 v%2"
   MismatchWarning: "这可能会导致问题。"
+  UninstallTool: "卸载"
+  OfficialToolProtected: "官方工具不可卸载。"
+  UninstallToolTitle: "卸载工具"
+  UninstallToolMessage: "卸载 %1 并移除其文件？"
+  UninstallToolFailedTitle: "工具卸载失败"

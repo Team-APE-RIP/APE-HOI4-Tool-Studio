@@ -10,7 +10,7 @@ l_zh_TW:
   ConfirmButton: "啟動工作室"
   BrowseButton: "瀏覽"
   ErrorTitle: "錯誤"
-  ErrorMsg: "請選擇目錄。"
+  ErrorMsg: "請選擇 Mod 目錄。"
   SelectGameDir: "選擇遊戲目錄"
   SelectDocDir: "選擇文檔目錄"
   SelectModDir: "選擇 Mod 目錄"

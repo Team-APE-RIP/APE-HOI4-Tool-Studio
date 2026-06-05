@@ -64,6 +64,16 @@ struct ScriptedTriggerRecord {
     APEHOI4ParserSourceRange idRange{};
 };
 
+struct FontRecord {
+    std::string name;
+    std::string path;
+    std::string color;
+    std::string fontFiles;
+    std::string languages;
+    std::string textColors;
+    APEHOI4ParserSourceRange nameRange{};
+};
+
 struct ScriptedEffectRecord {
     std::string id;
     APEHOI4ParserSourceRange idRange{};
@@ -121,6 +131,10 @@ public:
     uint32_t getScriptedTriggerEntryCount() const;
     uint32_t copyScriptedTriggerEntries(APEHOI4ParserScriptedTriggerEntry* outItems, uint32_t capacity) const;
 
+    uint32_t getFontEntryCount() const;
+    uint32_t copyFontEntries(APEHOI4ParserFontEntry* outItems, uint32_t capacity) const;
+    const char* getFontGlobalTextColorsUtf8() const;
+
     ParseStatsRecord getParseStats() const;
 
     const char* getDebugSyntaxTreeJson();
@@ -151,6 +165,8 @@ private:
     std::vector<FocusRecord> m_focusEntries;
     std::vector<IdeaRecord> m_ideaEntries;
     std::vector<ScriptedTriggerRecord> m_scriptedTriggerEntries;
+    std::vector<FontRecord> m_fontEntries;
+    std::string m_fontGlobalTextColors;
     std::vector<ScriptedEffectRecord> m_scriptedEffectEntries;
     ParseStatsRecord m_parseStats{};
 

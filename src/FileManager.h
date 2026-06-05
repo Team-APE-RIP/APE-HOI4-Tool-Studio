@@ -33,6 +33,7 @@ enum class FileSource : quint8 {
 struct FileDetails {
     QString absPath;
     FileSource source = FileSource::Game;
+    qint64 lastModifiedMs = 0;
     
     QString sourceString() const {
         switch (source) {
@@ -50,6 +51,7 @@ struct FileDetails {
         QJsonObject obj;
         obj["absPath"] = absPath;
         obj["source"] = sourceString();
+        obj["lastModifiedMs"] = QString::number(lastModifiedMs);
         return obj;
     }
     
@@ -65,6 +67,7 @@ struct FileDetails {
         } else {
             fd.source = FileSource::Game;
         }
+        fd.lastModifiedMs = obj["lastModifiedMs"].toString().toLongLong();
         
         return fd;
     }
@@ -79,7 +82,10 @@ public:
     void startScanning();
     void stopScanning();
 
+    bool getEffectiveFile(const QString& relativePath, FileDetails* outDetails) const;
     QMap<QString, FileDetails> getEffectiveFiles() const;
+    QMap<QString, FileDetails> getEffectiveFiles(const QString& relativeRoot,
+                                                 const QString& suffixFilter = QString()) const;
     QStringList getReplacePaths() const;
     int getFileCount() const;
     bool isScanning() const { return m_isScanning; }
@@ -140,6 +146,7 @@ public:
     struct ScanResult {
         QHash<QString, CompactFileRecord> files;
         QHash<QString, qint64> fileTimes;
+        QHash<QString, qint64> directoryTimes;
         QSet<QString> replacePaths;
         QStringList watchedPaths;
         QStringList rootPaths;
@@ -214,6 +221,7 @@ public:
                                               QMap<QString, FileDetails>& files,
                                               QMap<QString, qint64>& fileTimes);
     static bool isIgnoredFile(const QString& absPath, const QString& relPath, bool isDlc);
+    void scheduleRefreshForStaleIndex() const;
 
 private:
     QMap<QString, FileDetails> m_files;

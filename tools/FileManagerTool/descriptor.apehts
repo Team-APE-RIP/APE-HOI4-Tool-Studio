@@ -1,4 +1,5 @@
+id="10000001"
 name="FileManagerTool"
-version="2.1.0"
-supported_version="*.*.*"
+version="3.0.1"
+supported_version="2.3.*"
 author="Team APE:RIP"

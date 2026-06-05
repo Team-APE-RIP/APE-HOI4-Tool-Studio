@@ -8,6 +8,7 @@
 //-------------------------------------------------------------------------------------
 #include "PluginManager.h"
 
+#include "PackageRegistry.h"
 #include "Logger.h"
 #include <QCoreApplication>
 #include <QDir>
@@ -24,27 +25,14 @@ void PluginManager::loadPlugins() {
     m_plugins.clear();
     m_pluginMap.clear();
 
-    QDir appDir(QCoreApplication::applicationDirPath());
+    const QList<RegisteredPackage> registeredPlugins = PackageRegistry::registeredPackages(PackageKind::Plugin);
+    Logger::instance().logInfo(
+        "PluginManager",
+        QString("Scanning registered plugins: %1").arg(registeredPlugins.size())
+    );
 
-    if (appDir.exists("plugins")) {
-        appDir.cd("plugins");
-    } else {
-        QDir parentDir = appDir;
-        if (parentDir.cdUp() && parentDir.exists("plugins")) {
-            appDir = parentDir;
-            appDir.cd("plugins");
-        } else {
-            Logger::instance().logInfo("PluginManager", "Plugins directory not found.");
-            emit pluginsLoaded();
-            return;
-        }
-    }
-
-    Logger::instance().logInfo("PluginManager", "Scanning plugins in: " + appDir.absolutePath());
-
-    const QStringList subDirs = appDir.entryList(QDir::Dirs | QDir::NoDotAndDotDot);
-    for (const QString& dirName : subDirs) {
-        QDir pluginDir(appDir.filePath(dirName));
+    for (const RegisteredPackage& registeredPlugin : registeredPlugins) {
+        QDir pluginDir(registeredPlugin.directoryPath);
         const QString descriptorPath = pluginDir.filePath("descriptor.htsplugin");
         if (!QFile::exists(descriptorPath)) {
             Logger::instance().logWarning("PluginManager", "No descriptor.htsplugin found in: " + pluginDir.absolutePath());
@@ -57,6 +45,16 @@ void PluginManager::loadPlugins() {
             Logger::instance().logWarning("PluginManager", errorMessage);
             continue;
         }
+
+        if (info.id != registeredPlugin.id) {
+            Logger::instance().logWarning(
+                "PluginManager",
+                QString("Plugin registry ID does not match descriptor ID: %1 != %2")
+                    .arg(registeredPlugin.id, info.id)
+            );
+            continue;
+        }
+        info.official = registeredPlugin.official;
 
         const QStringList files = pluginDir.entryList(QStringList() << "*.dll" << "*.so" << "*.dylib", QDir::Files);
         if (!files.isEmpty()) {

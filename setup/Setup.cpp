@@ -17,6 +17,7 @@
 #include <QJsonDocument>
 #include <QJsonObject>
 #include <QLabel>
+#include <QLocale>
 #include <QMessageBox>
 #include <QPainter>
 #include <QPainterPath>
@@ -35,7 +36,6 @@ const char* kPathInstallPathKey = "Path/InstallPath";
 const char* kPathAutoSetupKey = "Path/AutoSetup";
 const QString kDefaultLanguageCode = QStringLiteral("en_US");
 const QString kSetupLocalisationRoot = QStringLiteral(":/localisation");
-const QString kDefaultInstallPath = QStringLiteral("D:/APE HOI4 Tool Studio");
 
 QString unquoteValue(QString value) {
     value = value.trimmed();
@@ -49,6 +49,20 @@ QString unquoteValue(QString value) {
 
 QString readJsonString(const QJsonObject& object, const QString& key) {
     return object.value(key).toString().trimmed();
+}
+
+QString defaultInstallPath() {
+    const QString localDataRoot = QStandardPaths::writableLocation(QStandardPaths::GenericDataLocation).trimmed();
+    if (!localDataRoot.isEmpty()) {
+        return QDir(localDataRoot).filePath(QStringLiteral("APE HOI4 Tool Studio"));
+    }
+
+    const QString homeRoot = QDir::homePath().trimmed();
+    if (!homeRoot.isEmpty()) {
+        return QDir(homeRoot).filePath(QStringLiteral("APE HOI4 Tool Studio"));
+    }
+
+    return QStringLiteral("APE HOI4 Tool Studio");
 }
 
 // --- SetupMessageBox Implementation ---
@@ -201,7 +215,13 @@ Setup::Setup(QWidget* parent)
     setupUi();
     populateLanguageCombo();
 
-    const QString initialLang = normalizeLanguageCode(QSettings(kRegistryOrganization, kRegistryApplication).value(kConfigLanguageKey, kDefaultLanguageCode).toString());
+    QSettings settings(kRegistryOrganization, kRegistryApplication);
+    QString initialLang;
+    if (settings.contains(kConfigLanguageKey)) {
+        initialLang = normalizeLanguageCode(settings.value(kConfigLanguageKey).toString());
+    } else {
+        initialLang = normalizeLanguageCode(QLocale::system().name());
+    }
 
     langCombo->blockSignals(true);
     langCombo->setCurrentText(displayTextForLanguage(initialLang));
@@ -288,6 +308,7 @@ QMap<QString, QString> Setup::parseSimpleYamlFile(const QString& path) const {
 QString Setup::normalizeLanguageCode(const QString& value) const {
     const QString trimmed = value.trimmed();
     if (trimmed == "English" || trimmed == "en_US") return "en_US";
+    if (trimmed == "Русский" || trimmed == "ru_RU") return "ru_RU";
     if (trimmed == "简体中文" || trimmed == "zh_CN") return "zh_CN";
     if (trimmed == "繁體中文" || trimmed == "zh_TW") return "zh_TW";
     if (m_languageTextByCode.contains(trimmed)) return trimmed;
@@ -374,15 +395,11 @@ void Setup::migrateLegacySettings() {
         tempLanguageFile.close();
         QFile::remove(tempLanguagePath);
     }
-
-    if (!settings.contains(kConfigLanguageKey)) {
-        settings.setValue(kConfigLanguageKey, QString(kDefaultLanguageCode));
-    }
 }
 
 QString Setup::currentInstallPath() const {
     QSettings settings(kRegistryOrganization, kRegistryApplication);
-    return settings.value(kPathInstallPathKey, kDefaultInstallPath).toString().trimmed();
+    return settings.value(kPathInstallPathKey, defaultInstallPath()).toString().trimmed();
 }
 
 bool Setup::currentAutoSetupFlag() const {
@@ -547,7 +564,7 @@ void Setup::setupUi() {
     topBarLayout->setContentsMargins(0, 0, 0, 0);
 
     QWidget* controlContainer = new QWidget(this);
-    controlContainer->setFixedWidth(60);
+    controlContainer->setFixedWidth(40);
     controlContainer->setStyleSheet("background: transparent;");
     QHBoxLayout* controlLayout = new QHBoxLayout(controlContainer);
     controlLayout->setContentsMargins(0, 0, 0, 0);
@@ -565,15 +582,13 @@ void Setup::setupUi() {
     };
 
     QPushButton* closeBtn = createControlBtn("#FF5F57", "#FF3B30");
-    QPushButton* minBtn = createControlBtn("#FFBD2E", "#FFAD1F");
-    QPushButton* maxBtn = createControlBtn("#28C940", "#24B538");
+    QPushButton* minBtn = createControlBtn("#5AC8FA", "#32ADE6");
 
     connect(closeBtn, &QPushButton::clicked, this, &Setup::closeWindow);
     connect(minBtn, &QPushButton::clicked, this, &QDialog::showMinimized);
 
     controlLayout->addWidget(closeBtn);
     controlLayout->addWidget(minBtn);
-    controlLayout->addWidget(maxBtn);
     controlLayout->addStretch();
 
     topBarLayout->addWidget(controlContainer);
@@ -615,7 +630,7 @@ void Setup::setupUi() {
 
     m_isAutoSetup = currentAutoSetupFlag();
     const QString installPath = currentInstallPath();
-    pathEdit->setText(installPath.isEmpty() ? kDefaultInstallPath : installPath);
+    pathEdit->setText(installPath.isEmpty() ? defaultInstallPath() : installPath);
 
     browseBtn = new QPushButton(this);
     browseBtn->setObjectName("BrowseButton");

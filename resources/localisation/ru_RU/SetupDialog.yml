@@ -10,7 +10,7 @@ l_ru_RU:
   ConfirmButton: "Запустить Studio"
   BrowseButton: "Обзор"
   ErrorTitle: "Ошибка"
-  ErrorMsg: "Пожалуйста, выберите каталоги."
+  ErrorMsg: "Пожалуйста, выберите каталог мода."
   SelectGameDir: "Выберите каталог игры"
   SelectDocDir: "Выберите каталог документов"
   SelectModDir: "Выберите каталог мода"

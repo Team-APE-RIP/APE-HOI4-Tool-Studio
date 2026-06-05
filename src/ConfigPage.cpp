@@ -11,14 +11,17 @@
 #include "LocalizationManager.h"
 #include "PathValidator.h"
 #include "CustomMessageBox.h"
+#include "PackageRegistry.h"
 #include "PluginManager.h"
 #include "Logger.h"
+#include "OverlayControlStyle.h"
 #include <QVBoxLayout>
 #include <QHBoxLayout>
 #include <QScrollArea>
 #include <QFileDialog>
 #include <QGroupBox>
 #include <QFile>
+#include <QMessageBox>
 #include <QTextStream>
 #include <algorithm>
 
@@ -62,9 +65,9 @@ void ConfigPage::setupUi() {
     title->setStyleSheet("font-size: 18px; font-weight: bold;");
 
     QPushButton *closeBtn = new QPushButton("×");
+    closeBtn->setObjectName("OverlayCloseButton");
     closeBtn->setFixedSize(30, 30);
     closeBtn->setCursor(Qt::PointingHandCursor);
-    closeBtn->setStyleSheet("border: none; font-size: 20px; color: #888;");
     connect(closeBtn, &QPushButton::clicked, this, &ConfigPage::closeClicked);
 
     headerLayout->addWidget(title);
@@ -87,21 +90,13 @@ void ConfigPage::setupUi() {
     QVBoxLayout *dirLayout = new QVBoxLayout();
     dirLayout->setSpacing(0);
 
-    QPushButton *reselectGameBtn = new QPushButton("Reselect");
-    reselectGameBtn->setObjectName("GameDir_ReselectBtn");
-    reselectGameBtn->setCursor(Qt::PointingHandCursor);
-    connect(reselectGameBtn, &QPushButton::clicked, this, &ConfigPage::browseGamePath);
     m_gamePathValue = new QLabel(ConfigManager::instance().getGamePath());
     m_gamePathValue->setStyleSheet("color: #888; font-size: 12px; margin-right: 10px;");
-    dirLayout->addWidget(createSettingRow("GameDir", ":/icons/folder-game.svg", "Game Directory", "Path to HOI4", m_gamePathValue, reselectGameBtn));
+    dirLayout->addWidget(createSettingRow("GameDir", ":/icons/folder-game.svg", "Game Directory", "Path to HOI4", m_gamePathValue, nullptr));
 
-    QPushButton *reselectDocBtn = new QPushButton("Reselect");
-    reselectDocBtn->setObjectName("DocDir_ReselectBtn");
-    reselectDocBtn->setCursor(Qt::PointingHandCursor);
-    connect(reselectDocBtn, &QPushButton::clicked, this, &ConfigPage::browseDocPath);
     m_docPathValue = new QLabel(ConfigManager::instance().getDocPath());
     m_docPathValue->setStyleSheet("color: #888; font-size: 12px; margin-right: 10px;");
-    dirLayout->addWidget(createSettingRow("DocDir", ":/icons/folder-doc.svg", "Documents Directory", "Path to HOI4 Documents", m_docPathValue, reselectDocBtn));
+    dirLayout->addWidget(createSettingRow("DocDir", ":/icons/folder-doc.svg", "Documents Directory", "Path to HOI4 Documents", m_docPathValue, nullptr));
 
     QPushButton *reselectModBtn = new QPushButton("Reselect");
     reselectModBtn->setObjectName("ModDir_ReselectBtn");
@@ -179,7 +174,21 @@ void ConfigPage::refreshPluginList() {
         QLabel *valueLabel = new QLabel(valueText);
         valueLabel->setStyleSheet("color: #888; font-size: 12px; margin-right: 10px;");
         valueLabel->setAlignment(Qt::AlignRight | Qt::AlignVCenter);
-        m_pluginListLayout->addWidget(createSettingRow("Plugin_" + plugin.name, ":/icons/package.svg", title, desc, valueLabel, nullptr));
+
+        const RegisteredPackage registeredPlugin = PackageRegistry::registeredPackage(PackageKind::Plugin, plugin.id);
+        QPushButton *uninstallButton = new QPushButton(loc.getString("ConfigPage", "Plugin_UninstallBtn"));
+        uninstallButton->setObjectName("Plugin_UninstallBtn");
+        uninstallButton->setCursor(plugin.official ? Qt::ArrowCursor : Qt::PointingHandCursor);
+        uninstallButton->setEnabled(!plugin.official);
+        uninstallButton->setProperty("officialPlugin", plugin.official);
+        if (plugin.official) {
+            uninstallButton->setToolTip(loc.getString("ConfigPage", "Plugin_OfficialProtected"));
+        }
+        connect(uninstallButton, &QPushButton::clicked, this, [this, plugin]() {
+            uninstallPlugin(plugin.id);
+        });
+
+        m_pluginListLayout->addWidget(createSettingRow("Plugin_" + plugin.name, ":/icons/package.svg", title, desc, valueLabel, uninstallButton));
     }
 }
 
@@ -192,13 +201,13 @@ QWidget* ConfigPage::createGroup(const QString &title, QLayout *contentLayout) {
 
     QLabel *titleLabel = new QLabel(title);
     titleLabel->setObjectName(title + "_GroupTitle");
-    titleLabel->setStyleSheet("font-size: 14px; font-weight: bold; color: #888; margin-left: 10px; margin-bottom: 5px;");
+    titleLabel->setProperty("overlayRole", "GroupTitle");
 
     QWidget *container = new QWidget();
     container->setObjectName("GroupContainer");
     container->setLayout(contentLayout);
 
-    groupLayout->addWidget(titleLabel);
+    groupLayout->addWidget(titleLabel, 0, Qt::AlignLeft);
     groupLayout->addWidget(container);
 
     return group;
@@ -207,14 +216,14 @@ QWidget* ConfigPage::createGroup(const QString &title, QLayout *contentLayout) {
 QWidget* ConfigPage::createSettingRow(const QString &id, const QString &icon, const QString &title, const QString &desc, QWidget *valueWidget, QWidget *control) {
     QWidget *row = new QWidget();
     row->setObjectName("SettingRow");
-    row->setFixedHeight(60);
+    row->setFixedHeight(56);
     QHBoxLayout *layout = new QHBoxLayout(row);
-    layout->setContentsMargins(15, 10, 20, 10);
-    layout->setSpacing(15);
+    layout->setContentsMargins(14, 8, 18, 8);
+    layout->setSpacing(13);
 
     QLabel *iconLbl = new QLabel();
     iconLbl->setObjectName("SettingIcon");
-    iconLbl->setFixedSize(34, 34);
+    iconLbl->setFixedSize(32, 32);
     iconLbl->setAlignment(Qt::AlignCenter);
     iconLbl->setProperty("svgIcon", icon);
 
@@ -236,7 +245,10 @@ QWidget* ConfigPage::createSettingRow(const QString &id, const QString &icon, co
     layout->addLayout(textLayout);
     layout->addStretch();
     if (valueWidget) layout->addWidget(valueWidget);
-    if (control) layout->addWidget(control);
+    if (control) {
+        OverlayControlStyle::polishFormControl(control);
+        layout->addWidget(control);
+    }
 
     return row;
 }
@@ -263,12 +275,6 @@ void ConfigPage::updateTexts() {
     QLabel *docDesc = findChild<QLabel*>("DocDir_Desc");
     if(docDesc) docDesc->setText(loc.getString("ConfigPage", "DocDir_Desc"));
 
-    QPushButton *reselectGameBtn = findChild<QPushButton*>("GameDir_ReselectBtn");
-    if(reselectGameBtn) reselectGameBtn->setText(loc.getString("ConfigPage", "ReselectBtn"));
-
-    QPushButton *reselectDocBtn = findChild<QPushButton*>("DocDir_ReselectBtn");
-    if(reselectDocBtn) reselectDocBtn->setText(loc.getString("ConfigPage", "ReselectBtn"));
-
     QLabel *modTitle = findChild<QLabel*>("ModDir_Title");
     if(modTitle) modTitle->setText(loc.getString("ConfigPage", "ModDir_Title"));
     QLabel *modDesc = findChild<QLabel*>("ModDir_Desc");
@@ -287,6 +293,10 @@ void ConfigPage::updateTexts() {
 
 void ConfigPage::updateTheme() {
     bool isDark = ConfigManager::instance().isCurrentThemeDark();
+    const QString disabledButtonStyle = isDark
+        ? QStringLiteral("QPushButton#Plugin_UninstallBtn:disabled { color: #8E8E93; background-color: #2C2C2E; border: 1px solid #5C5C5F; }")
+        : QStringLiteral("QPushButton#Plugin_UninstallBtn:disabled { color: #8E8E93; background-color: #F2F2F7; border: 1px solid #D1D1D6; }");
+    setStyleSheet(OverlayControlStyle::pageStyleSheet(isDark) + disabledButtonStyle);
 
     QList<QLabel*> iconLabels = findChildren<QLabel*>("SettingIcon");
     for (QLabel* lbl : iconLabels) {
@@ -301,51 +311,6 @@ void ConfigPage::showEvent(QShowEvent *event) {
     QWidget::showEvent(event);
     Logger::instance().logInfo("ConfigPage", "Config page shown, forcing plugin refresh");
     refreshPlugins();
-}
-
-void ConfigPage::browseGamePath() {
-    LocalizationManager& loc = LocalizationManager::instance();
-    QString dir = QFileDialog::getExistingDirectory(this,
-        loc.getString("SetupDialog", "SelectGameDir"),
-        ConfigManager::instance().getGamePath());
-    if (!dir.isEmpty()) {
-        // Validate game path before saving
-        QString gameError = PathValidator::instance().validateGamePath(dir);
-        if (!gameError.isEmpty()) {
-            CustomMessageBox::information(this,
-                loc.getString("Error", "GamePathInvalid"),
-                loc.getString("Error", gameError));
-            Logger::instance().logError("ConfigPage", "Game path validation failed: " + gameError);
-            return;
-        }
-
-        ConfigManager::instance().setGamePath(dir);
-        m_gamePathValue->setText(dir);
-        emit gamePathChanged();
-        Logger::instance().logClick("BrowseGamePath");
-    }
-}
-
-void ConfigPage::browseDocPath() {
-    LocalizationManager& loc = LocalizationManager::instance();
-    QString dir = QFileDialog::getExistingDirectory(this,
-        loc.getString("SetupDialog", "SelectDocDir"),
-        ConfigManager::instance().getDocPath());
-    if (!dir.isEmpty()) {
-        // Validate doc path before saving
-        QString docError = PathValidator::instance().validateDocPath(dir);
-        if (!docError.isEmpty()) {
-            CustomMessageBox::information(this,
-                loc.getString("Error", "DocPathInvalid"),
-                loc.getString("Error", docError));
-            Logger::instance().logError("ConfigPage", "Doc path validation failed: " + docError);
-            return;
-        }
-
-        ConfigManager::instance().setDocPath(dir);
-        m_docPathValue->setText(dir);
-        Logger::instance().logClick("BrowseDocPath");
-    }
 }
 
 void ConfigPage::browseModPath() {
@@ -369,4 +334,34 @@ void ConfigPage::browseModPath() {
         emit modPathChanged();
         Logger::instance().logClick("BrowseModPath");
     }
+}
+
+void ConfigPage::uninstallPlugin(const QString& pluginId) {
+    const RegisteredPackage pluginPackage = PackageRegistry::registeredPackage(PackageKind::Plugin, pluginId);
+    LocalizationManager& loc = LocalizationManager::instance();
+    if (!pluginPackage.isValid() || pluginPackage.official) {
+        return;
+    }
+
+    const QMessageBox::StandardButton answer = CustomMessageBox::question(
+        this,
+        loc.getString("ConfigPage", "Plugin_UninstallTitle"),
+        loc.getString("ConfigPage", "Plugin_UninstallMessage").arg(pluginPackage.name)
+    );
+    if (answer != QMessageBox::Yes) {
+        return;
+    }
+
+    QString errorMessage;
+    if (!PackageRegistry::removeInstalledPackage(PackageKind::Plugin, pluginId, &errorMessage)) {
+        CustomMessageBox::information(
+            this,
+            loc.getString("ConfigPage", "Plugin_UninstallFailedTitle"),
+            errorMessage
+        );
+        return;
+    }
+
+    PluginManager::instance().loadPlugins();
+    refreshPluginList();
 }

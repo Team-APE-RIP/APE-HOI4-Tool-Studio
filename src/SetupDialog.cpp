@@ -12,6 +12,7 @@
 #include "PathValidator.h"
 #include "CustomMessageBox.h"
 #include "Logger.h"
+#include "OverlayAcrylicMaterial.h"
 #include <QVBoxLayout>
 #include <QHBoxLayout>
 #include <QPainter>
@@ -25,6 +26,7 @@ SetupDialog::SetupDialog(QWidget *parent)
     
     setAttribute(Qt::WA_TransparentForMouseEvents, false);
     setAttribute(Qt::WA_TranslucentBackground);
+    OverlayAcrylicMaterial::installLiveRefresh(this);
     
     hide();
     
@@ -34,19 +36,11 @@ SetupDialog::SetupDialog(QWidget *parent)
     
     // Load existing config
     ConfigManager& config = ConfigManager::instance();
-    if (!config.getGamePath().isEmpty()) {
-        m_gamePathEdit->setText(config.getGamePath());
-    }
-    if (!config.getDocPath().isEmpty()) {
-        m_docPathEdit->setText(config.getDocPath());
-    }
     if (!config.getModPath().isEmpty()) {
         m_modPathEdit->setText(config.getModPath());
     }
     
     // Connect real-time save signals
-    connect(m_gamePathEdit, &QLineEdit::textChanged, this, &SetupDialog::onGamePathChanged);
-    connect(m_docPathEdit, &QLineEdit::textChanged, this, &SetupDialog::onDocPathChanged);
     connect(m_modPathEdit, &QLineEdit::textChanged, this, &SetupDialog::onModPathChanged);
     
     if (parent) {
@@ -56,9 +50,9 @@ SetupDialog::SetupDialog(QWidget *parent)
 
 void SetupDialog::setupUi() {
     // Container for content (centered)
-    m_container = new QWidget(this);
+    m_container = new OverlayAcrylicPanel(this);
     m_container->setObjectName("SetupContainer");
-    m_container->setFixedSize(500, 630);
+    m_container->setFixedSize(500, 500);
     
     QVBoxLayout *layout = new QVBoxLayout(m_container);
     layout->setContentsMargins(40, 20, 40, 20);
@@ -84,58 +78,6 @@ void SetupDialog::setupUi() {
     
     layout->addSpacing(10);
     
-    // Game Path
-    QVBoxLayout *gameLayout = new QVBoxLayout();
-    gameLayout->setSpacing(8);
-    
-    m_gameLabel = new QLabel(m_container);
-    m_gameLabel->setObjectName("GameLabel");
-    gameLayout->addWidget(m_gameLabel);
-    
-    QHBoxLayout *gameInputLayout = new QHBoxLayout();
-    gameInputLayout->setSpacing(8);
-    
-    m_gamePathEdit = new QLineEdit(m_container);
-    m_gamePathEdit->setObjectName("GamePathEdit");
-    m_gamePathEdit->setPlaceholderText("Select HOI4 installation folder...");
-    
-    m_browseGameBtn = new QPushButton(m_container);
-    m_browseGameBtn->setObjectName("BrowseButton");
-    m_browseGameBtn->setCursor(Qt::PointingHandCursor);
-    m_browseGameBtn->setFixedWidth(80);
-    connect(m_browseGameBtn, &QPushButton::clicked, this, &SetupDialog::browseGamePath);
-    
-    gameInputLayout->addWidget(m_gamePathEdit);
-    gameInputLayout->addWidget(m_browseGameBtn);
-    gameLayout->addLayout(gameInputLayout);
-    layout->addLayout(gameLayout);
-    
-    // Doc Path
-    QVBoxLayout *docLayout = new QVBoxLayout();
-    docLayout->setSpacing(8);
-    
-    m_docLabel = new QLabel(m_container);
-    m_docLabel->setObjectName("DocLabel");
-    docLayout->addWidget(m_docLabel);
-    
-    QHBoxLayout *docInputLayout = new QHBoxLayout();
-    docInputLayout->setSpacing(8);
-    
-    m_docPathEdit = new QLineEdit(m_container);
-    m_docPathEdit->setObjectName("DocPathEdit");
-    m_docPathEdit->setPlaceholderText("Select your Hearts of Iron IV documents folder...");
-    
-    m_browseDocBtn = new QPushButton(m_container);
-    m_browseDocBtn->setObjectName("BrowseButton");
-    m_browseDocBtn->setCursor(Qt::PointingHandCursor);
-    m_browseDocBtn->setFixedWidth(80);
-    connect(m_browseDocBtn, &QPushButton::clicked, this, &SetupDialog::browseDocPath);
-    
-    docInputLayout->addWidget(m_docPathEdit);
-    docInputLayout->addWidget(m_browseDocBtn);
-    docLayout->addLayout(docInputLayout);
-    layout->addLayout(docLayout);
-    
     // Mod Path
     QVBoxLayout *modLayout = new QVBoxLayout();
     modLayout->setSpacing(8);
@@ -151,7 +93,7 @@ void SetupDialog::setupUi() {
     m_modPathEdit->setObjectName("ModPathEdit");
     m_modPathEdit->setPlaceholderText("Select your Mod folder...");
     
-    m_browseModBtn = new QPushButton(m_container);
+    m_browseModBtn = new OverlayAcrylicButton(OverlayAcrylicButton::Role::Secondary, m_container);
     m_browseModBtn->setObjectName("BrowseButton");
     m_browseModBtn->setCursor(Qt::PointingHandCursor);
     m_browseModBtn->setFixedWidth(80);
@@ -165,7 +107,7 @@ void SetupDialog::setupUi() {
     layout->addStretch();
     
     // Confirm Button
-    m_confirmBtn = new QPushButton(m_container);
+    m_confirmBtn = new OverlayAcrylicButton(OverlayAcrylicButton::Role::Accent, m_container);
     m_confirmBtn->setObjectName("ConfirmButton");
     m_confirmBtn->setCursor(Qt::PointingHandCursor);
     m_confirmBtn->setFixedHeight(45);
@@ -176,47 +118,23 @@ void SetupDialog::setupUi() {
 void SetupDialog::updateTheme() {
     m_isDarkMode = ConfigManager::instance().isCurrentThemeDark();
     
-    QString containerBg = m_isDarkMode ? "#2C2C2E" : "#FFFFFF";
     QString textColor = m_isDarkMode ? "#FFFFFF" : "#1D1D1F";
     QString borderColor = m_isDarkMode ? "#3A3A3C" : "#D2D2D7";
-    QString inputBg = m_isDarkMode ? "#3A3A3C" : "#FFFFFF";
-    QString btnBg = m_isDarkMode ? "#0A84FF" : "#007AFF";
-    QString btnHoverBg = m_isDarkMode ? "#0070E0" : "#0062CC";
-    QString browseBtnBg = m_isDarkMode ? "#3A3A3C" : "#E5E5EA";
-    QString browseBtnHoverBg = m_isDarkMode ? "#4A4A4C" : "#D1D1D6";
-    QString browseBtnText = m_isDarkMode ? "#0A84FF" : "#007AFF";
-    QString itemHover = m_isDarkMode ? "#3A3A3C" : "rgba(0, 0, 0, 0.05)";
-    QString comboIndicator = m_isDarkMode ? "#FFFFFF" : "#1D1D1F";
+    QString inputBg = m_isDarkMode ? "rgba(58, 58, 60, 0.54)" : "rgba(255, 255, 255, 0.50)";
+    QString accentGlass = OverlayAcrylicMaterial::accentGlassBrush(m_isDarkMode);
     
     m_container->setStyleSheet(QString(
         "QWidget#SetupContainer {"
-        "  background-color: %1;"
-        "  border: 1px solid %2;"
-        "  border-radius: 12px;"
+        "  background-color: transparent;"
+        "  border: none;"
         "}"
-    ).arg(containerBg, borderColor));
+    ));
     
     m_titleLabel->setStyleSheet(QString(
         "QLabel#SetupTitle {"
         "  color: %1;"
         "  font-size: 20px;"
         "  font-weight: bold;"
-        "}"
-    ).arg(textColor));
-    
-    m_gameLabel->setStyleSheet(QString(
-        "QLabel#GameLabel {"
-        "  color: %1;"
-        "  font-size: 14px;"
-        "  font-weight: 500;"
-        "}"
-    ).arg(textColor));
-    
-    m_docLabel->setStyleSheet(QString(
-        "QLabel#DocLabel {"
-        "  color: %1;"
-        "  font-size: 14px;"
-        "  font-weight: 500;"
         "}"
     ).arg(textColor));
     
@@ -228,28 +146,6 @@ void SetupDialog::updateTheme() {
         "}"
     ).arg(textColor));
     
-    m_gamePathEdit->setStyleSheet(QString(
-        "QLineEdit#GamePathEdit {"
-        "  border: 1px solid %1;"
-        "  border-radius: 6px;"
-        "  padding: 10px 12px;"
-        "  background-color: %2;"
-        "  color: %3;"
-        "  selection-background-color: #007AFF;"
-        "}"
-    ).arg(borderColor, inputBg, textColor));
-    
-    m_docPathEdit->setStyleSheet(QString(
-        "QLineEdit#DocPathEdit {"
-        "  border: 1px solid %1;"
-        "  border-radius: 6px;"
-        "  padding: 10px 12px;"
-        "  background-color: %2;"
-        "  color: %3;"
-        "  selection-background-color: #007AFF;"
-        "}"
-    ).arg(borderColor, inputBg, textColor));
-    
     m_modPathEdit->setStyleSheet(QString(
         "QLineEdit#ModPathEdit {"
         "  border: 1px solid %1;"
@@ -257,61 +153,51 @@ void SetupDialog::updateTheme() {
         "  padding: 10px 12px;"
         "  background-color: %2;"
         "  color: %3;"
-        "  selection-background-color: #007AFF;"
+        "  selection-background-color: %4;"
+        "  selection-color: #FFFFFF;"
         "}"
-    ).arg(borderColor, inputBg, textColor));
+    ).arg(borderColor, inputBg, textColor, accentGlass));
     
-    m_browseGameBtn->setStyleSheet(QString(
+    m_browseModBtn->setStyleSheet(QString(
         "QPushButton#BrowseButton {"
-        "  background-color: %1;"
-        "  color: %2;"
+        "  background-color: transparent;"
+        "  color: %1;"
         "  border: none;"
-        "  border-radius: 6px;"
         "  padding: 10px 16px;"
         "  font-weight: 500;"
         "}"
         "QPushButton#BrowseButton:hover {"
-        "  background-color: %3;"
+        "  background-color: transparent;"
         "}"
-    ).arg(browseBtnBg, browseBtnText, browseBtnHoverBg));
-    
-    m_browseDocBtn->setStyleSheet(m_browseGameBtn->styleSheet());
-    m_browseModBtn->setStyleSheet(m_browseGameBtn->styleSheet());
+    ).arg(textColor));
     
     m_confirmBtn->setStyleSheet(QString(
         "QPushButton#ConfirmButton {"
-        "  background-color: %1;"
+        "  background-color: transparent;"
         "  color: white;"
         "  border: none;"
-        "  border-radius: 8px;"
         "  padding: 12px 30px;"
         "  font-weight: 600;"
         "  font-size: 15px;"
         "}"
         "QPushButton#ConfirmButton:hover {"
-        "  background-color: %2;"
+        "  background-color: transparent;"
         "}"
         "QPushButton#ConfirmButton:pressed {"
-        "  background-color: #004999;"
+        "  background-color: transparent;"
         "}"
-    ).arg(btnBg, btnHoverBg));
+    ));
 }
 
 void SetupDialog::updateTexts() {
     LocalizationManager& loc = LocalizationManager::instance();
     
     m_titleLabel->setText(loc.getString("SetupDialog", "TitleLabel"));
-    m_gameLabel->setText(loc.getString("SetupDialog", "GameLabel"));
-    m_docLabel->setText(loc.getString("SetupDialog", "DocLabel"));
     m_modLabel->setText(loc.getString("SetupDialog", "ModLabel"));
     
-    m_gamePathEdit->setPlaceholderText(loc.getString("SetupDialog", "GamePlaceholder"));
-    m_docPathEdit->setPlaceholderText(loc.getString("SetupDialog", "DocPlaceholder"));
     m_modPathEdit->setPlaceholderText(loc.getString("SetupDialog", "ModPlaceholder"));
     
     m_confirmBtn->setText(loc.getString("SetupDialog", "ConfirmButton"));
-    m_browseGameBtn->setText(loc.getString("SetupDialog", "BrowseButton"));
-    m_browseDocBtn->setText(loc.getString("SetupDialog", "BrowseButton"));
     m_browseModBtn->setText(loc.getString("SetupDialog", "BrowseButton"));
 }
 
@@ -346,14 +232,13 @@ void SetupDialog::paintEvent(QPaintEvent *event) {
     QPainter painter(this);
     painter.setRenderHint(QPainter::Antialiasing);
     
-    // Semi-transparent background with rounded corners
-    QPainterPath path;
-    QRectF r = rect();
-    qreal radius = 9;
-    
-    path.addRoundedRect(r, radius, radius);
-    
-    painter.fillPath(path, QColor(0, 0, 0, 120));
+    OverlayAcrylicMaterial::paintOverlayBackdrop(
+        painter,
+        this,
+        QRectF(rect()),
+        9.0,
+        ConfigManager::instance().isCurrentThemeDark(),
+        120);
 }
 
 bool SetupDialog::eventFilter(QObject *obj, QEvent *event) {
@@ -361,19 +246,6 @@ bool SetupDialog::eventFilter(QObject *obj, QEvent *event) {
         updatePosition();
     }
     return QWidget::eventFilter(obj, event);
-}
-
-void SetupDialog::browseGamePath() {
-    LocalizationManager& loc = LocalizationManager::instance();
-    QString dir = QFileDialog::getExistingDirectory(this, 
-        loc.getString("SetupDialog", "SelectGameDir"),
-        "",
-        QFileDialog::ShowDirsOnly | QFileDialog::DontResolveSymlinks);
-    
-    if (!dir.isEmpty()) {
-        m_gamePathEdit->setText(dir);
-        Logger::instance().logClick("SetupBrowseGamePath");
-    }
 }
 
 void SetupDialog::browseModPath() {
@@ -389,26 +261,6 @@ void SetupDialog::browseModPath() {
     }
 }
 
-void SetupDialog::browseDocPath() {
-    LocalizationManager& loc = LocalizationManager::instance();
-    QString dir = QFileDialog::getExistingDirectory(this, 
-        loc.getString("SetupDialog", "SelectDocDir"),
-        "",
-        QFileDialog::ShowDirsOnly | QFileDialog::DontResolveSymlinks);
-    
-    if (!dir.isEmpty()) {
-        m_docPathEdit->setText(dir);
-        Logger::instance().logClick("SetupBrowseDocPath");
-    }
-}
-
-void SetupDialog::onGamePathChanged(const QString &path) {
-    if (!path.isEmpty()) {
-        ConfigManager::instance().setGamePath(path);
-        Logger::instance().logInfo("SetupDialog", "Game path saved: " + path);
-    }
-}
-
 void SetupDialog::onModPathChanged(const QString &path) {
     if (!path.isEmpty()) {
         ConfigManager::instance().setModPath(path);
@@ -416,27 +268,29 @@ void SetupDialog::onModPathChanged(const QString &path) {
     }
 }
 
-void SetupDialog::onDocPathChanged(const QString &path) {
-    if (!path.isEmpty()) {
-        ConfigManager::instance().setDocPath(path);
-        Logger::instance().logInfo("SetupDialog", "Doc path saved: " + path);
-    }
-}
-
 void SetupDialog::validateAndAccept() {
     LocalizationManager& loc = LocalizationManager::instance();
     
     // Check if paths are empty
-    if (m_gamePathEdit->text().isEmpty() || m_modPathEdit->text().isEmpty() || m_docPathEdit->text().isEmpty()) {
+    if (m_modPathEdit->text().isEmpty()) {
         CustomMessageBox::information(nullptr, 
             loc.getString("SetupDialog", "ErrorTitle"), 
             loc.getString("SetupDialog", "ErrorMsg"));
-        Logger::instance().logError("SetupDialog", "Validation failed: Empty paths");
+        Logger::instance().logError("SetupDialog", "Validation failed: Empty mod path");
         return;
     }
     
     // Validate game path
-    QString gameError = PathValidator::instance().validateGamePath(m_gamePathEdit->text());
+    const QString resolvedGamePath = PathValidator::instance().ensureGamePathDiscovered();
+    if (resolvedGamePath.isEmpty()) {
+        CustomMessageBox::information(nullptr,
+            loc.getString("MainWindow", "GameStartupFailedTitle"),
+            loc.getString("MainWindow", "GameStartupFailedMsg"));
+        Logger::instance().logError("SetupDialog", "Game path discovery failed during setup validation.");
+        return;
+    }
+
+    QString gameError = PathValidator::instance().validateGamePath(ConfigManager::instance().getGamePath());
     if (!gameError.isEmpty()) {
         CustomMessageBox::information(nullptr, 
             loc.getString("Error", "GamePathInvalid"), 
@@ -455,35 +309,27 @@ void SetupDialog::validateAndAccept() {
         return;
     }
     
-    // Validate doc path if provided
-    QString docPath = m_docPathEdit->text();
-    if (!docPath.isEmpty()) {
-        QString docError = PathValidator::instance().validateDocPath(docPath);
-        if (!docError.isEmpty()) {
-            CustomMessageBox::information(nullptr, 
-                loc.getString("Error", "DocPathInvalid"), 
-                loc.getString("Error", docError));
-            Logger::instance().logError("SetupDialog", "Doc path validation failed: " + docError);
-            return;
-        }
+    const QString docError = PathValidator::instance().validateDocPath(ConfigManager::instance().getDocPath());
+    if (!docError.isEmpty()) {
+        CustomMessageBox::information(nullptr,
+            loc.getString("Error", "DocPathInvalid"),
+            loc.getString("Error", docError));
+        Logger::instance().logError("SetupDialog", "Doc path validation failed: " + docError);
+        return;
     }
     
     Logger::instance().logClick("SetupConfirm");
     
     // Save final config
     ConfigManager& config = ConfigManager::instance();
-    config.setGamePath(m_gamePathEdit->text());
     config.setModPath(m_modPathEdit->text());
-    if (!docPath.isEmpty()) {
-        config.setDocPath(docPath);
-    }
     
     emit setupCompleted();
     hideOverlay();
 }
 
 QString SetupDialog::getGamePath() const {
-    return m_gamePathEdit->text();
+    return ConfigManager::instance().getGamePath();
 }
 
 QString SetupDialog::getModPath() const {
@@ -504,13 +350,7 @@ bool SetupDialog::isConfigValid() {
         return false;
     }
     
-    // Check if doc path exists and is valid (if provided)
-    QString docPath = config.getDocPath();
-    if (docPath.isEmpty()) {
-        return false;
-    }
-    
-    QString docError = PathValidator::instance().validateDocPath(docPath);
+    QString docError = PathValidator::instance().validateDocPath(ConfigManager::instance().getDocPath());
     if (!docError.isEmpty()) {
         return false;
     }

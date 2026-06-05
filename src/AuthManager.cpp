@@ -8,6 +8,7 @@
 //-------------------------------------------------------------------------------------
 #include "AuthManager.h"
 
+#include "ApiRequests.h"
 #include "LocalizationManager.h"
 #include "Logger.h"
 
@@ -23,57 +24,382 @@
 #include <QSysInfo>
 #include <QTextStream>
 #include <QThread>
+#include <QTimeZone>
 #include <QUuid>
 #include <QUrl>
 
+#include <algorithm>
+
 namespace {
 const QByteArray kPingServerSecret("22105c8f255c1ebbc8cbcfd192aabb45de9beb1068b6ec1ef5017313d505223475b620899e9545659cc4c6ff88114ebabb5679c0f0e03286b58029ce40ca9cd5");
+constexpr int kSecureLoginMaxAgeDays = 14;
+constexpr int kSecureLoginNoiseChunkCount = 6;
+constexpr int kSecureLoginNoiseChunkLength = 24;
+const char* kSecureLoginPrefix = "APE-SAFE-LOGIN-V1";
+
+struct SecureLoginInsertion {
+    int position = 0;
+    int chunkIndex = 0;
+};
 
 QString computeHmacHex(const QByteArray& key, const QByteArray& message) {
     return QString(QMessageAuthenticationCode::hash(message, key, QCryptographicHash::Sha256).toHex());
 }
 
-void applyCommonApiHeaders(HttpRequestOptions& options) {
-    HttpClient::addOrReplaceHeader(options, "User-Agent", "Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/133.0.0.0 Safari/537.36 APEHOI4ToolStudio/1.0");
-    HttpClient::addOrReplaceHeader(options, "Accept", "application/json, text/plain, */*");
-    HttpClient::addOrReplaceHeader(options, "Accept-Language", "zh-CN,zh;q=0.9,en;q=0.8");
+QByteArray credentialStoragePublicKey() {
+    return QByteArrayLiteral("APE-HOI4-Tool-Studio:PasswordStoragePublicKey:v1:9d52cfa91f4f41c18b7c0a7bc255d24f");
 }
 
-void applyStrictNoCacheHeaders(HttpRequestOptions& options) {
-    HttpClient::addOrReplaceHeader(options, "Cache-Control", "no-store, no-cache, must-revalidate, max-age=0");
-    HttpClient::addOrReplaceHeader(options, "Pragma", "no-cache");
-    HttpClient::addOrReplaceHeader(options, "Expires", "0");
+QByteArray deriveCredentialStorageKey(const QString& hwid, const QString& timestamp) {
+    QByteArray seed;
+    seed.reserve(hwid.toUtf8().size() + timestamp.toUtf8().size() + credentialStoragePublicKey().size() + 16);
+    seed.append(hwid.toUtf8());
+    seed.append('|');
+    seed.append(timestamp.toUtf8());
+    seed.append('|');
+    seed.append(credentialStoragePublicKey());
+
+    QByteArray key = QCryptographicHash::hash(seed, QCryptographicHash::Sha256);
+    for (int round = 0; round < 2048; ++round) {
+        QByteArray roundSeed;
+        roundSeed.reserve(key.size() + seed.size() + 16);
+        roundSeed.append(key);
+        roundSeed.append(seed);
+        roundSeed.append(QByteArray::number(round));
+        key = QCryptographicHash::hash(roundSeed, QCryptographicHash::Sha256);
+    }
+
+    return key;
 }
 
-QString normalizedBaseHostFromResource() {
-    static const QString cachedBaseHost = []() -> QString {
-        QFile file(QStringLiteral(":/baseurl.txt"));
-        if (!file.open(QIODevice::ReadOnly | QIODevice::Text)) {
-            return QString();
+QString base64UrlEncode(const QByteArray& data) {
+    return QString::fromLatin1(data.toBase64(QByteArray::Base64UrlEncoding | QByteArray::OmitTrailingEquals));
+}
+
+bool base64UrlDecode(const QString& text, QByteArray* output) {
+    if (!output) {
+        return false;
+    }
+
+    static const QRegularExpression validBase64Url(QStringLiteral("^[A-Za-z0-9_-]*$"));
+    if (!validBase64Url.match(text).hasMatch()) {
+        return false;
+    }
+
+    QByteArray normalized = text.toLatin1();
+    const int remainder = normalized.size() % 4;
+    if (remainder != 0) {
+        normalized.append(QByteArray(4 - remainder, '='));
+    }
+
+    *output = QByteArray::fromBase64(normalized, QByteArray::Base64UrlEncoding);
+    return text.isEmpty() || !output->isEmpty();
+}
+
+QDateTime parseSecureLoginTimestamp(const QString& timestamp) {
+    static const QRegularExpression validTimestamp(QStringLiteral("^\\d{14}$"));
+    if (!validTimestamp.match(timestamp).hasMatch()) {
+        return QDateTime();
+    }
+
+    QDateTime generatedAt = QDateTime::fromString(timestamp, QStringLiteral("yyyyMMddHHmmss"));
+    if (!generatedAt.isValid()) {
+        return QDateTime();
+    }
+
+    generatedAt.setTimeZone(QTimeZone(QTimeZone::UTC));
+    return generatedAt;
+}
+
+bool isSecureLoginTimestampExpired(const QDateTime& generatedAtUtc) {
+    if (!generatedAtUtc.isValid()) {
+        return true;
+    }
+
+    const qint64 ageSeconds = generatedAtUtc.secsTo(QDateTime::currentDateTimeUtc());
+    return ageSeconds > static_cast<qint64>(kSecureLoginMaxAgeDays) * 24 * 60 * 60;
+}
+
+QStringList buildSecureLoginNoiseChunks(const QString& timestamp) {
+    QStringList chunks;
+    chunks.reserve(kSecureLoginNoiseChunkCount);
+
+    for (int index = 0; index < kSecureLoginNoiseChunkCount; ++index) {
+        QByteArray seed;
+        seed.append("noise|");
+        seed.append(timestamp.toUtf8());
+        seed.append('|');
+        seed.append(QByteArray::number(index));
+        seed.append('|');
+        seed.append(credentialStoragePublicKey());
+
+        chunks.append(QString::fromLatin1(
+            QCryptographicHash::hash(seed, QCryptographicHash::Sha256).toHex().left(kSecureLoginNoiseChunkLength)
+        ));
+    }
+
+    return chunks;
+}
+
+QList<SecureLoginInsertion> buildSecureLoginInsertions(const QString& timestamp, int originalLength) {
+    QList<SecureLoginInsertion> insertions;
+    insertions.reserve(kSecureLoginNoiseChunkCount);
+
+    for (int index = 0; index < kSecureLoginNoiseChunkCount; ++index) {
+        QByteArray seed;
+        seed.append("position|");
+        seed.append(timestamp.toUtf8());
+        seed.append('|');
+        seed.append(QByteArray::number(originalLength));
+        seed.append('|');
+        seed.append(QByteArray::number(index));
+        seed.append('|');
+        seed.append(credentialStoragePublicKey());
+
+        const QByteArray hash = QCryptographicHash::hash(seed, QCryptographicHash::Sha256);
+        quint32 value = 0;
+        for (int byteIndex = 0; byteIndex < 4 && byteIndex < hash.size(); ++byteIndex) {
+            value = (value << 8) | static_cast<quint8>(hash.at(byteIndex));
         }
 
-        const QString rawText = QTextStream(&file).readAll().trimmed();
-        file.close();
+        SecureLoginInsertion insertion;
+        insertion.position = originalLength <= 0 ? 0 : static_cast<int>(value % static_cast<quint32>(originalLength + 1));
+        insertion.chunkIndex = index;
+        insertions.append(insertion);
+    }
 
-        if (rawText.isEmpty()) {
-            return QString();
+    std::sort(insertions.begin(), insertions.end(), [](const SecureLoginInsertion& left, const SecureLoginInsertion& right) {
+        if (left.position == right.position) {
+            return left.chunkIndex < right.chunkIndex;
+        }
+        return left.position < right.position;
+    });
+
+    return insertions;
+}
+
+QString obfuscateSecureLoginEnvelope(const QString& envelope, const QString& timestamp) {
+    const QStringList chunks = buildSecureLoginNoiseChunks(timestamp);
+    const QList<SecureLoginInsertion> insertions = buildSecureLoginInsertions(timestamp, envelope.size());
+
+    QString obfuscated;
+    obfuscated.reserve(envelope.size() + kSecureLoginNoiseChunkCount * kSecureLoginNoiseChunkLength);
+
+    int insertionIndex = 0;
+    for (int index = 0; index <= envelope.size(); ++index) {
+        while (insertionIndex < insertions.size() && insertions.at(insertionIndex).position == index) {
+            obfuscated.append(chunks.at(insertions.at(insertionIndex).chunkIndex));
+            ++insertionIndex;
         }
 
-        QString normalized = rawText;
-        normalized.remove(QRegularExpression(QStringLiteral("^https?://"), QRegularExpression::CaseInsensitiveOption));
-        while (normalized.endsWith('/')) {
-            normalized.chop(1);
+        if (index < envelope.size()) {
+            obfuscated.append(envelope.at(index));
+        }
+    }
+
+    return obfuscated;
+}
+
+bool deobfuscateSecureLoginEnvelope(const QString& obfuscated, const QString& timestamp, QString* envelope) {
+    if (!envelope) {
+        return false;
+    }
+
+    const QStringList chunks = buildSecureLoginNoiseChunks(timestamp);
+    const int noiseLength = kSecureLoginNoiseChunkCount * kSecureLoginNoiseChunkLength;
+    if (obfuscated.size() < noiseLength) {
+        return false;
+    }
+
+    const int originalLength = obfuscated.size() - noiseLength;
+    const QList<SecureLoginInsertion> insertions = buildSecureLoginInsertions(timestamp, originalLength);
+
+    QString decoded;
+    decoded.reserve(originalLength);
+
+    int sourceIndex = 0;
+    int insertionIndex = 0;
+    for (int index = 0; index <= originalLength; ++index) {
+        while (insertionIndex < insertions.size() && insertions.at(insertionIndex).position == index) {
+            const QString& expectedChunk = chunks.at(insertions.at(insertionIndex).chunkIndex);
+            if (obfuscated.mid(sourceIndex, expectedChunk.size()) != expectedChunk) {
+                return false;
+            }
+            sourceIndex += expectedChunk.size();
+            ++insertionIndex;
         }
 
-        const QUrl httpsUrl(QStringLiteral("https://") + normalized);
-        if (!httpsUrl.isValid() || httpsUrl.host().isEmpty()) {
-            return QString();
+        if (index < originalLength) {
+            if (sourceIndex >= obfuscated.size()) {
+                return false;
+            }
+            decoded.append(obfuscated.at(sourceIndex));
+            ++sourceIndex;
+        }
+    }
+
+    if (sourceIndex != obfuscated.size()) {
+        return false;
+    }
+
+    *envelope = decoded;
+    return true;
+}
+
+QByteArray xorSecureLoginPayload(const QByteArray& payload, const QByteArray& key, const QByteArray& nonce) {
+    QByteArray result;
+    result.resize(payload.size());
+
+    int offset = 0;
+    int blockIndex = 0;
+    while (offset < payload.size()) {
+        QByteArray seed;
+        seed.reserve(key.size() + nonce.size() + 16);
+        seed.append(key);
+        seed.append('|');
+        seed.append(nonce);
+        seed.append('|');
+        seed.append(QByteArray::number(blockIndex));
+
+        const QByteArray streamBlock = QCryptographicHash::hash(seed, QCryptographicHash::Sha256);
+        for (int index = 0; index < streamBlock.size() && offset < payload.size(); ++index, ++offset) {
+            result[offset] = static_cast<char>(
+                static_cast<quint8>(payload.at(offset)) ^ static_cast<quint8>(streamBlock.at(index))
+            );
         }
 
-        return normalized;
-    }();
+        ++blockIndex;
+    }
 
-    return cachedBaseHost;
+    return result;
+}
+
+QString buildSecureLoginPayload(const QString& timestamp, const QString& username, const QString& password) {
+    return timestamp
+        + QLatin1Char(':')
+        + base64UrlEncode(username.toUtf8())
+        + QLatin1Char(':')
+        + base64UrlEncode(password.toUtf8());
+}
+
+bool parseSecureLoginPayload(const QByteArray& payload,
+                             const QString& expectedTimestamp,
+                             QString* username,
+                             QString* password) {
+    if (!username || !password) {
+        return false;
+    }
+
+    const QString payloadText = QString::fromUtf8(payload);
+    const QStringList parts = payloadText.split(QLatin1Char(':'));
+    if (parts.size() != 3 || parts.at(0) != expectedTimestamp) {
+        return false;
+    }
+
+    QByteArray decodedUsername;
+    QByteArray decodedPassword;
+    if (!base64UrlDecode(parts.at(1), &decodedUsername)
+        || !base64UrlDecode(parts.at(2), &decodedPassword)) {
+        return false;
+    }
+
+    *username = QString::fromUtf8(decodedUsername);
+    *password = QString::fromUtf8(decodedPassword);
+    return !username->isEmpty() && !password->isEmpty();
+}
+
+QString encodeSecureLoginCredential(const QString& username, const QString& password, const QString& hwid) {
+    const QString timestamp = QDateTime::currentDateTimeUtc().toString(QStringLiteral("yyyyMMddHHmmss"));
+    const QByteArray nonce = QUuid::createUuid().toString(QUuid::WithoutBraces).remove(QLatin1Char('-')).toLatin1();
+    const QByteArray key = deriveCredentialStorageKey(hwid, timestamp);
+    const QByteArray payload = buildSecureLoginPayload(timestamp, username, password).toUtf8();
+    const QByteArray cipherText = xorSecureLoginPayload(payload, key, nonce);
+
+    QByteArray macInput;
+    macInput.reserve(timestamp.toUtf8().size() + nonce.size() + cipherText.size() + 2);
+    macInput.append(timestamp.toUtf8());
+    macInput.append('|');
+    macInput.append(nonce);
+    macInput.append('|');
+    macInput.append(cipherText);
+
+    const QString mac = computeHmacHex(key, macInput);
+    const QString envelope = QStringLiteral("%1.%2.%3")
+        .arg(QString::fromLatin1(nonce), base64UrlEncode(cipherText), mac);
+
+    return QStringLiteral("%1.%2.%3")
+        .arg(QString::fromLatin1(kSecureLoginPrefix), timestamp, obfuscateSecureLoginEnvelope(envelope, timestamp));
+}
+
+bool decodeSecureLoginCredential(const QString& storedValue,
+                                 const QString& hwid,
+                                 QString* username,
+                                 QString* password,
+                                 bool* expired) {
+    if (expired) {
+        *expired = false;
+    }
+
+    if (!username || !password) {
+        return false;
+    }
+
+    const QString prefix = QStringLiteral("%1.").arg(QString::fromLatin1(kSecureLoginPrefix));
+    if (!storedValue.startsWith(prefix)) {
+        return false;
+    }
+
+    const int timestampStart = prefix.size();
+    const int timestampEnd = storedValue.indexOf(QLatin1Char('.'), timestampStart);
+    if (timestampEnd <= timestampStart) {
+        return false;
+    }
+
+    const QString timestamp = storedValue.mid(timestampStart, timestampEnd - timestampStart);
+    const QDateTime generatedAtUtc = parseSecureLoginTimestamp(timestamp);
+    if (!generatedAtUtc.isValid()) {
+        return false;
+    }
+
+    if (isSecureLoginTimestampExpired(generatedAtUtc)) {
+        if (expired) {
+            *expired = true;
+        }
+        return false;
+    }
+
+    QString envelope;
+    if (!deobfuscateSecureLoginEnvelope(storedValue.mid(timestampEnd + 1), timestamp, &envelope)) {
+        return false;
+    }
+
+    const QStringList fields = envelope.split(QLatin1Char('.'));
+    if (fields.size() != 3) {
+        return false;
+    }
+
+    const QByteArray nonce = fields.at(0).toLatin1();
+    QByteArray cipherText;
+    if (nonce.isEmpty() || !base64UrlDecode(fields.at(1), &cipherText) || fields.at(2).size() != 64) {
+        return false;
+    }
+
+    const QByteArray key = deriveCredentialStorageKey(hwid, timestamp);
+    QByteArray macInput;
+    macInput.reserve(timestamp.toUtf8().size() + nonce.size() + cipherText.size() + 2);
+    macInput.append(timestamp.toUtf8());
+    macInput.append('|');
+    macInput.append(nonce);
+    macInput.append('|');
+    macInput.append(cipherText);
+
+    const QString expectedMac = computeHmacHex(key, macInput);
+    if (fields.at(2).compare(expectedMac, Qt::CaseInsensitive) != 0) {
+        return false;
+    }
+
+    const QByteArray payload = xorSecureLoginPayload(cipherText, key, nonce);
+    return parseSecureLoginPayload(payload, timestamp, username, password);
 }
 
 QString sanitizeSensitiveAuthEndpointText(const QString& text) {
@@ -82,24 +408,21 @@ QString sanitizeSensitiveAuthEndpointText(const QString& text) {
     }
 
     QString sanitized = text;
-    const QString baseHost = normalizedBaseHostFromResource();
-    static const QString kSensitiveAuthPathPrefix = QStringLiteral("/api/v1/auth");
-    static const QString kRedactedAuthEndpoint = QStringLiteral("<redacted-auth-endpoint>");
-    static const QString kRedactedApiBase = QStringLiteral("<redacted-api>");
+    const QString baseHost = ApiRequests::apiBaseHost();
 
     if (!baseHost.isEmpty()) {
         const QString httpsBaseUrl = QStringLiteral("https://") + baseHost;
         const QString httpBaseUrl = QStringLiteral("http://") + baseHost;
-        const QString httpsAuthEndpoint = httpsBaseUrl + QStringLiteral("/api/v1/auth");
-        const QString httpAuthEndpoint = httpBaseUrl + QStringLiteral("/api/v1/auth");
+        const QString httpsAuthEndpoint = httpsBaseUrl + ApiRequests::authPathPrefix();
+        const QString httpAuthEndpoint = httpBaseUrl + ApiRequests::authPathPrefix();
 
-        sanitized.replace(httpsAuthEndpoint, kRedactedAuthEndpoint, Qt::CaseInsensitive);
-        sanitized.replace(httpAuthEndpoint, kRedactedAuthEndpoint, Qt::CaseInsensitive);
-        sanitized.replace(httpsBaseUrl, kRedactedApiBase, Qt::CaseInsensitive);
-        sanitized.replace(httpBaseUrl, kRedactedApiBase, Qt::CaseInsensitive);
+        sanitized.replace(httpsAuthEndpoint, ApiRequests::redactedAuthEndpoint(), Qt::CaseInsensitive);
+        sanitized.replace(httpAuthEndpoint, ApiRequests::redactedAuthEndpoint(), Qt::CaseInsensitive);
+        sanitized.replace(httpsBaseUrl, ApiRequests::redactedApiBase(), Qt::CaseInsensitive);
+        sanitized.replace(httpBaseUrl, ApiRequests::redactedApiBase(), Qt::CaseInsensitive);
     }
 
-    sanitized.replace(kSensitiveAuthPathPrefix, kRedactedAuthEndpoint, Qt::CaseInsensitive);
+    sanitized.replace(ApiRequests::authPathPrefix(), ApiRequests::redactedAuthEndpoint(), Qt::CaseInsensitive);
 
     return sanitized;
 }
@@ -142,31 +465,15 @@ AuthManager& AuthManager::instance() {
 }
 
 QString AuthManager::getApiBaseHost() {
-    return normalizedBaseHostFromResource();
+    return ApiRequests::apiBaseHost();
 }
 
 QString AuthManager::getApiBaseUrl(bool useHttps) {
-    const QString baseHost = getApiBaseHost();
-    if (baseHost.isEmpty()) {
-        return QString();
-    }
-
-    return QStringLiteral("%1://%2")
-        .arg(useHttps ? QStringLiteral("https") : QStringLiteral("http"))
-        .arg(baseHost);
+    return ApiRequests::apiBaseUrl(useHttps);
 }
 
 QString AuthManager::buildApiUrl(const QString& path, bool useHttps) {
-    QString normalizedPath = path.trimmed();
-    if (normalizedPath.isEmpty()) {
-        return getApiBaseUrl(useHttps);
-    }
-
-    if (!normalizedPath.startsWith('/')) {
-        normalizedPath.prepend('/');
-    }
-
-    return getApiBaseUrl(useHttps) + normalizedPath;
+    return ApiRequests::buildApiUrl(path, useHttps);
 }
 
 QString AuthManager::sanitizeSensitiveApiText(const QString& text) {
@@ -180,6 +487,7 @@ AuthManager::AuthManager(QObject* parent)
     , m_isAuthenticated(false)
     , m_channel("stable")
     , m_isLoggingIn(false)
+    , m_persistCredentialsForCurrentLogin(true)
     , m_isConnected(false)
     , m_connectionWarningActive(false)
     , m_hasSuccessfulConnectionCheck(false) {
@@ -229,7 +537,7 @@ bool AuthManager::hasSavedCredentials() const {
 
 void AuthManager::autoLogin() {
     if (hasSavedCredentials()) {
-        login(m_username, m_password);
+        login(m_username, m_password, false);
     }
 }
 
@@ -239,9 +547,10 @@ QString AuthManager::generateHWID() {
     return QString(QCryptographicHash::hash(hwidData, QCryptographicHash::Sha256).toHex());
 }
 
-void AuthManager::login(const QString& username, const QString& password) {
+void AuthManager::login(const QString& username, const QString& password, bool persistCredentials) {
     m_username = username;
     m_password = password;
+    m_persistCredentialsForCurrentLogin = persistCredentials;
     m_isLoggingIn = true;
 
     Logger::instance().logInfo("AuthManager", "Attempting login for user: " + m_username);
@@ -252,13 +561,7 @@ void AuthManager::login(const QString& username, const QString& password) {
     json["hwid"] = m_hwid;
 
     const QByteArray requestData = QJsonDocument(json).toJson(QJsonDocument::Compact);
-    HttpRequestOptions options = HttpClient::createJsonPost(QUrl(buildApiUrl("/api/v1/auth/login")), requestData);
-    applyCommonApiHeaders(options);
-    options.category = HttpRequestCategory::Auth;
-    options.timeoutMs = 20000;
-    options.connectTimeoutMs = 5000;
-    options.maxRetries = 1;
-    options.retryOnHttp5xx = true;
+    HttpRequestOptions options = ApiRequests::createLoginRequest(requestData);
 
     QJsonObject logJson = json;
     logJson["password"] = "***";
@@ -320,7 +623,9 @@ void AuthManager::onLoginReply(const HttpResponse& response) {
         m_hasSuccessfulConnectionCheck = false;
         m_connectionLossWindowTimer.restart();
         startConnectionCheck();
-        saveCredentials();
+        if (m_persistCredentialsForCurrentLogin) {
+            saveCredentials();
+        }
 
         QSettings settings("Team-APE-RIP", "APE-HOI4-Tool-Studio");
         settings.setValue("Auth/LastUserId", m_userId);
@@ -358,17 +663,10 @@ void AuthManager::sendHeartbeat() {
     QJsonObject json;
     json["hwid"] = m_hwid;
 
-    HttpRequestOptions options = HttpClient::createJsonPost(
-        QUrl(buildApiUrl("/api/v1/auth/heartbeat")),
+    HttpRequestOptions options = ApiRequests::createHeartbeatRequest(
         QJsonDocument(json).toJson(QJsonDocument::Compact)
     );
-    applyCommonApiHeaders(options);
-    HttpClient::addOrReplaceHeader(options, "Authorization", QString("Bearer %1").arg(m_token).toUtf8());
-    options.category = HttpRequestCategory::Auth;
-    options.timeoutMs = 15000;
-    options.connectTimeoutMs = 5000;
-    options.maxRetries = 1;
-    options.retryOnHttp5xx = true;
+    ApiRequests::applyBearerAuthorization(options, m_token);
 
     HttpClient::instance().send(options, this, [this](const HttpResponse& response) {
         onHeartbeatReply(response);
@@ -585,6 +883,7 @@ void AuthManager::logout() {
     m_hasSuccessfulConnectionCheck = false;
 
     QSettings settings("Team-APE-RIP", "APE-HOI4-Tool-Studio");
+    settings.remove(QStringLiteral("Auth/安全登录"));
     settings.remove("Auth/Username");
     settings.remove("Auth/Password");
     settings.remove("Auth/LastUserId");
@@ -594,14 +893,56 @@ void AuthManager::logout() {
 
 void AuthManager::saveCredentials() {
     QSettings settings("Team-APE-RIP", "APE-HOI4-Tool-Studio");
-    settings.setValue("Auth/Username", m_username);
-    settings.setValue("Auth/Password", m_password);
+    if (m_username.isEmpty() || m_password.isEmpty()) {
+        settings.remove(QStringLiteral("Auth/安全登录"));
+    } else {
+        settings.setValue(QStringLiteral("Auth/安全登录"), encodeSecureLoginCredential(m_username, m_password, m_hwid));
+    }
+    settings.remove("Auth/Username");
+    settings.remove("Auth/Password");
 }
 
 void AuthManager::loadCredentials() {
     QSettings settings("Team-APE-RIP", "APE-HOI4-Tool-Studio");
-    m_username = settings.value("Auth/Username", "").toString();
-    m_password = settings.value("Auth/Password", "").toString();
+    m_username.clear();
+    m_password.clear();
+
+    const QString secureLoginValue = settings.value(QStringLiteral("Auth/安全登录"), QString()).toString();
+    if (!secureLoginValue.isEmpty()) {
+        bool expired = false;
+        QString username;
+        QString password;
+        if (decodeSecureLoginCredential(secureLoginValue, m_hwid, &username, &password, &expired)) {
+            m_username = username;
+            m_password = password;
+            settings.remove("Auth/Username");
+            settings.remove("Auth/Password");
+            return;
+        }
+
+        settings.remove(QStringLiteral("Auth/安全登录"));
+        settings.remove("Auth/Username");
+        settings.remove("Auth/Password");
+        Logger::instance().logInfo(
+            "AuthManager",
+            expired
+                ? QStringLiteral("Secure login credential expired; manual login is required.")
+                : QStringLiteral("Secure login credential could not be decoded; manual login is required.")
+        );
+        return;
+    }
+
+    const QString legacyUsername = settings.value("Auth/Username", "").toString();
+    const QString legacyPassword = settings.value("Auth/Password", "").toString();
+    if (!legacyUsername.isEmpty() && !legacyPassword.isEmpty()) {
+        m_username = legacyUsername;
+        m_password = legacyPassword;
+        saveCredentials();
+        Logger::instance().logInfo("AuthManager", "Legacy plaintext login credentials migrated to secure storage.");
+    } else {
+        settings.remove("Auth/Username");
+        settings.remove("Auth/Password");
+    }
 }
 
 void AuthManager::startConnectionCheck() {
@@ -644,26 +985,11 @@ void AuthManager::onConnectionCheckTimer() {
 }
 
 void AuthManager::sendPingChallenge() {
-    QUrl challengeUrl(buildApiUrl("/api/v1/ping/challenge"));
-    challengeUrl.setQuery(QString("t=%1&n=%2")
-        .arg(QDateTime::currentMSecsSinceEpoch())
-        .arg(QUuid::createUuid().toString(QUuid::WithoutBraces)));
-
-    HttpRequestOptions options = HttpClient::createGet(challengeUrl);
-    applyCommonApiHeaders(options);
-    applyStrictNoCacheHeaders(options);
-    HttpClient::addOrReplaceHeader(options, "Authorization", QString("Bearer %1").arg(m_token).toUtf8());
-    options.category = HttpRequestCategory::Ping;
-    options.timeoutMs = 12000;
-    options.connectTimeoutMs = 3000;
-    options.maxRetries = 2;
-    options.retryOnHttp5xx = true;
-    options.retryOnTimeout = true;
-    options.retryBackoffMs = 300;
-    options.httpVersionPolicy = HttpVersionPolicy::ForceHttp11;
-    options.ipResolvePolicy = HttpIpResolvePolicy::PreferIpv4;
-    options.allowHttp11Fallback = true;
-    options.allowIpv4Fallback = true;
+    HttpRequestOptions options = ApiRequests::createPingChallengeRequest(
+        QDateTime::currentMSecsSinceEpoch(),
+        QUuid::createUuid().toString(QUuid::WithoutBraces)
+    );
+    ApiRequests::applyBearerAuthorization(options, m_token);
 
     HttpClient::instance().send(options, this, [this](const HttpResponse& response) {
         if (!response.success) {
@@ -720,24 +1046,10 @@ void AuthManager::sendPingVerify(const QString& nonce, const QString& timestamp,
     json["timestamp"] = timestamp;
     json["client_response"] = clientResponse;
 
-    HttpRequestOptions options = HttpClient::createJsonPost(
-        QUrl(buildApiUrl("/api/v1/ping/verify")),
+    HttpRequestOptions options = ApiRequests::createPingVerifyRequest(
         QJsonDocument(json).toJson(QJsonDocument::Compact)
     );
-    applyCommonApiHeaders(options);
-    applyStrictNoCacheHeaders(options);
-    HttpClient::addOrReplaceHeader(options, "Authorization", QString("Bearer %1").arg(m_token).toUtf8());
-    options.category = HttpRequestCategory::Ping;
-    options.timeoutMs = 12000;
-    options.connectTimeoutMs = 3000;
-    options.maxRetries = 2;
-    options.retryOnHttp5xx = true;
-    options.retryOnTimeout = true;
-    options.retryBackoffMs = 300;
-    options.httpVersionPolicy = HttpVersionPolicy::ForceHttp11;
-    options.ipResolvePolicy = HttpIpResolvePolicy::PreferIpv4;
-    options.allowHttp11Fallback = true;
-    options.allowIpv4Fallback = true;
+    ApiRequests::applyBearerAuthorization(options, m_token);
 
     HttpClient::instance().send(options, this, [this](const HttpResponse& response) {
         if (!response.success) {

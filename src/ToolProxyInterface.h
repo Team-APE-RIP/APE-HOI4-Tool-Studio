@@ -14,52 +14,10 @@
 #include <QLocalServer>
 #include <QLocalSocket>
 #include <QTimer>
-#include <QWidget>
-#include <QWindow>
-#include <QPointer>
 #include <QMap>
 #include <functional>
 #include "ToolInterface.h"
 #include "ToolIpcProtocol.h"
-
-class QTreeWidget;
-class QVBoxLayout;
-
-// Container widget that embeds the tool's window from subprocess
-class ToolEmbedContainer : public QWidget {
-    Q_OBJECT
-public:
-    explicit ToolEmbedContainer(QWidget* parent = nullptr);
-    ~ToolEmbedContainer();
-    
-    // Set pending window ID for delayed embedding
-    void setPendingWindowId(WId windowId);
-    bool embedWindow(WId windowId);
-    void releaseWindow();
-    
-    // Check if window is embedded
-    bool isEmbedded() const { return m_embedded; }
-    
-signals:
-    void embeddingComplete(bool success);
-    void resized(int width, int height);
-    
-protected:
-    void showEvent(QShowEvent* event) override;
-    void resizeEvent(QResizeEvent* event) override;
-    
-private:
-    void doEmbed();
-    
-    QWindow* m_foreignWindow;
-    QWidget* m_container;
-    WId m_pendingWindowId = 0;
-    bool m_embedded = false;
-    bool m_firstShow = true;
-#ifdef Q_OS_WIN
-    void* m_childHwnd;  // HWND stored as void* to avoid including windows.h
-#endif
-};
 
 // Proxy class that implements ToolInterface but delegates to subprocess
 class ToolProxyInterface : public QObject, public ToolInterface {
@@ -77,23 +35,30 @@ public:
     QString compatibleVersion() const override { return m_toolInfo.compatibleVersion; }
     QString author() const override { return m_toolInfo.author; }
     QStringList dependencies() const override { return m_toolInfo.dependencies; }
+    QJsonObject metaData() const { return m_metaData; }
     
     void setMetaData(const QJsonObject& metaData) override;
     QIcon icon() const override;
     void initialize() override;
-    QWidget* createWidget(QWidget* parent = nullptr) override;
-    QWidget* createSidebarWidget(QWidget* parent = nullptr) override;
-    QList<ToolRightSidebarButtonDefinition> rightSidebarButtons() const override { return {}; }
-    ToolRightSidebarState rightSidebarState() const override { return {}; }
-    QTreeWidget* rightSidebarListWidget() const override { return nullptr; }
-    void handleRightSidebarButton(const QString& key) override { Q_UNUSED(key); }
+    
+    // Scripted UI Resources (REQUIRED)
+    ToolGuiResourceDescriptor guiResourceDescriptor() const override;
+    ToolWorkerDescriptor workerDescriptor() const override;
+    
+    // Worker Session Lifecycle
+    void initializeWorkerSession() override;
+    ToolUiStatePacket initialUiState() const override;
+    ToolUiStatePacket handleUiAction(const ToolUiActionRequest& request) override;
+
     void loadLanguage(const QString& lang) override;
+    QMap<QString, QString> localizedStrings() const override { return m_localizedStrings; }
     void applyTheme() override;
     
     // Process management
     bool startProcess();
     void stopProcess();
     void forceKillProcess();
+    void discardProcess();
     bool waitForProcessStopped(int timeoutMs);
     bool isProcessRunning() const;
     
@@ -105,8 +70,7 @@ signals:
     void processStarted();
     void processStopped();
     void processCrashed(const QString& error);
-    void widgetReady(QWidget* widget);
-    void sidebarWidgetReady(QWidget* widget);
+    void statePacketUpdated(const QJsonObject& statePacket);
 
 private slots:
     void onNewConnection();
@@ -120,9 +84,20 @@ private slots:
 private:
     void handleMessage(const ToolIpc::Message& msg);
     void handleDataRequest(const ToolIpc::Message& msg);
-    bool isPluginDependencyAuthorized(const QString& pluginName) const;
+    void processAvailableMessages();
     void sendMessage(ToolIpc::MessageType type, const QJsonObject& payload = QJsonObject(), quint32 requestId = 0);
     quint32 nextRequestId() { return ++m_requestIdCounter; }
+    bool isWorkerSessionReady() const;
+    void stopHeartbeatTimers();
+    void clearPendingRequests();
+    void markSessionAvailable();
+    void handleSessionUnavailable(const QString& reason, bool terminateProcess = false);
+    void requestInitialStateAsync();
+    bool sendStateRequest(ToolIpc::MessageType type,
+                          const QJsonObject& payload = QJsonObject(),
+                          const QString& reason = QString());
+    void setCachedLifecycleState(const QString& status, const QString& message, bool notify);
+    static ToolUiStatePacket parseStatePacket(const QJsonObject& jsonObject);
     
     // Request-response handling
     using ResponseCallback = std::function<void(const ToolIpc::Message&)>;
@@ -140,17 +115,23 @@ private:
     QTimer* m_heartbeatTimer;
     QTimer* m_heartbeatTimeoutTimer;
     
+    QJsonObject m_metaData;
     ToolIpc::ToolInfo m_toolInfo;
     bool m_infoLoaded;
     bool m_processReady;
     bool m_stopping = false;
+    bool m_sessionUnavailable = false;
+    bool m_initialStateQueryPending = false;
+    QString m_sessionUnavailableReason;
     
     quint32 m_requestIdCounter;
     QMap<quint32, ResponseCallback> m_pendingRequests;
-    
-    QPointer<ToolEmbedContainer> m_mainContainer;
-    QPointer<ToolEmbedContainer> m_sidebarContainer;
-    WId m_pendingWindowId = 0;
+    ToolUiStatePacket m_cachedStatePacket;
+    QMap<QString, QString> m_localizedStrings;
+    QString m_currentLanguageCode;
+    QString m_currentGameLanguageCode;
+    QJsonObject m_currentGameLanguageNames;
+
 };
 
 #endif // TOOLPROXYINTERFACE_H

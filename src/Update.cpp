@@ -8,9 +8,11 @@
 //-------------------------------------------------------------------------------------
 #include "Update.h"
 
+#include "ApiRequests.h"
 #include "AuthManager.h"
 #include "ConfigManager.h"
 #include "LocalizationManager.h"
+#include "OverlayAcrylicMaterial.h"
 
 #include <QApplication>
 #include <QCoreApplication>
@@ -65,6 +67,7 @@ Update::Update(QWidget* parent)
     : QWidget(parent) {
     setAttribute(Qt::WA_TransparentForMouseEvents, false);
     setAttribute(Qt::WA_TranslucentBackground);
+    OverlayAcrylicMaterial::installLiveRefresh(this);
 
     setupUi();
     updateTheme();
@@ -80,7 +83,7 @@ Update::~Update() {
 }
 
 void Update::setupUi() {
-    m_container = new QWidget(this);
+    m_container = new OverlayAcrylicPanel(this);
     m_container->setObjectName("UpdateContainer");
     m_container->setFixedSize(400, 300);
 
@@ -143,7 +146,7 @@ void Update::setupUi() {
     QHBoxLayout* btnLayout = new QHBoxLayout(btnPage);
     btnLayout->setContentsMargins(0, 0, 0, 0);
 
-    m_updateBtn = new QPushButton(btnPage);
+    m_updateBtn = new OverlayAcrylicButton(OverlayAcrylicButton::Role::Accent, btnPage);
     m_updateBtn->setObjectName("UpdateBtn");
     m_updateBtn->setCursor(Qt::PointingHandCursor);
     m_updateBtn->setFixedHeight(32);
@@ -181,25 +184,21 @@ void Update::setupUi() {
 void Update::updateTheme() {
     const bool isDark = ConfigManager::instance().isCurrentThemeDark();
 
-    const QString containerBg = isDark ? "#2C2C2E" : "#FFFFFF";
     const QString textColor = isDark ? "#FFFFFF" : "#1D1D1F";
     const QString secondaryTextColor = isDark ? "#8E8E93" : "#86868B";
-    const QString borderColor = isDark ? "#3A3A3C" : "#D2D2D7";
-    const QString progressBg = isDark ? "#3A3A3C" : "#E5E5EA";
-    const QString progressChunk = "#007AFF";
-    const QString primaryBtnBg = "#007AFF";
-    const QString primaryBtnHoverBg = "#0062CC";
+    const QString progressBg = isDark ? "rgba(58, 58, 60, 0.58)" : "rgba(229, 229, 234, 0.68)";
+    const QString progressChunk = OverlayAcrylicMaterial::accentGlassBrush(isDark);
+    const QString primaryTextColor = isDark ? "#6CB8FF" : "#006EDB";
 
     m_container->setStyleSheet(QString(
         "QWidget#UpdateContainer {"
-        "  background-color: %1;"
-        "  border: 1px solid %2;"
-        "  border-radius: 12px;"
+        "  background-color: transparent;"
+        "  border: none;"
         "}"
-    ).arg(containerBg, borderColor));
+    ));
 
     m_titleLabel->setStyleSheet(QString("color: %1;").arg(textColor));
-    m_versionLabel->setStyleSheet(QString("color: %1; font-weight: 500;").arg(primaryBtnBg));
+    m_versionLabel->setStyleSheet(QString("color: %1; font-weight: 500;").arg(primaryTextColor));
     m_changelogLabel->setStyleSheet(QString(
         "QTextBrowser#UpdateChangelog {"
         "  color: %1;"
@@ -244,16 +243,15 @@ void Update::updateTheme() {
 
     m_updateBtn->setStyleSheet(QString(
         "QPushButton#UpdateBtn {"
-        "  background-color: %1;"
+        "  background-color: transparent;"
         "  color: #FFFFFF;"
         "  border: none;"
-        "  border-radius: 6px;"
         "  font-weight: 500;"
         "}"
         "QPushButton#UpdateBtn:hover {"
-        "  background-color: %2;"
+        "  background-color: transparent;"
         "}"
-    ).arg(primaryBtnBg, primaryBtnHoverBg));
+    ));
 
     m_titleLabel->setText(LocalizationManager::instance().getString("Update", "new_version_title"));
     m_updateBtn->setText(LocalizationManager::instance().getString("Update", "update_now"));
@@ -284,28 +282,14 @@ void Update::showCheckingOverlay() {
 }
 
 void Update::fetchManifest() {
-    HttpRequestOptions options = HttpClient::createGet(QUrl(AuthManager::getApiBaseUrl() + "/api/v1/update/manifest"));
-    HttpClient::addOrReplaceHeader(options, "User-Agent", "APE-HOI4-Tool-Studio-Updater");
+    HttpRequestOptions options = ApiRequests::createUpdateManifestRequest(
+        AuthManager::instance().getChannel(),
+        QString(APP_VERSION),
+        LocalizationManager::instance().currentLang()
+    );
 
     const QString token = AuthManager::instance().getToken();
-    if (!token.isEmpty()) {
-        HttpClient::addOrReplaceHeader(options, "Authorization", QString("Bearer %1").arg(token).toUtf8());
-    }
-
-    HttpClient::addOrReplaceHeader(options, "X-Update-Channel", AuthManager::instance().getChannel().toUtf8());
-    HttpClient::addOrReplaceHeader(options, "X-Current-Version", QString(APP_VERSION).toUtf8());
-    HttpClient::addOrReplaceHeader(options, "X-Lang", LocalizationManager::instance().currentLang().toUtf8());
-
-    options.category = HttpRequestCategory::Manifest;
-    options.timeoutMs = 12000;
-    options.connectTimeoutMs = 3500;
-    options.maxRetries = 2;
-    options.retryOnHttp5xx = true;
-    options.retryOnTimeout = true;
-    options.retryBackoffMs = 350;
-    options.httpVersionPolicy = HttpVersionPolicy::PreferHttp2;
-    options.allowHttp11Fallback = true;
-    options.allowIpv4Fallback = true;
+    ApiRequests::applyBearerAuthorization(options, token);
 
     HttpClient::instance().send(options, this, [this](const HttpResponse& response) {
         onManifestReceived(response);
@@ -461,7 +445,7 @@ QString Update::resolveDownloadUrl(const UpdateFile& file) const {
         return candidate;
     }
 
-    return AuthManager::getApiBaseUrl() + candidate;
+    return ApiRequests::updateDownloadUrl(candidate);
 }
 
 void Update::queueDownloadTask(const UpdateFile& file, const QString& targetPath, bool isUpdater) {
@@ -575,10 +559,7 @@ void Update::startDownloadTask(const UpdateDownloadTask& task) {
     const bool isLargeDownload = task.file.size > 8 * 1024 * 1024;
     const bool isVeryLargeDownload = task.file.size > 64 * 1024 * 1024;
 
-    HttpRequestOptions options = HttpClient::createGet(QUrl(resolvedUrl));
-    HttpClient::addOrReplaceHeader(options, "User-Agent", "APE-HOI4-Tool-Studio-Updater");
-    HttpClient::addOrReplaceHeader(options, "Accept", "*/*");
-    HttpClient::addOrReplaceHeader(options, "Cache-Control", "no-cache");
+    HttpRequestOptions options = ApiRequests::createUpdateDownloadRequest(resolvedUrl);
     options.category = isLargeDownload ? HttpRequestCategory::LargeDownload : HttpRequestCategory::UpdateDownload;
     options.timeoutMs = isVeryLargeDownload ? 420000 : (isLargeDownload ? 240000 : 120000);
     options.connectTimeoutMs = 5000;
@@ -781,12 +762,13 @@ void Update::paintEvent(QPaintEvent* event) {
     QPainter painter(this);
     painter.setRenderHint(QPainter::Antialiasing);
 
-    QPainterPath path;
-    const QRectF r = rect();
-    const qreal radius = 9;
-
-    path.addRoundedRect(r, radius, radius);
-    painter.fillPath(path, QColor(0, 0, 0, 120));
+    OverlayAcrylicMaterial::paintOverlayBackdrop(
+        painter,
+        this,
+        QRectF(rect()),
+        9.0,
+        ConfigManager::instance().isCurrentThemeDark(),
+        120);
 }
 
 bool Update::eventFilter(QObject* obj, QEvent* event) {

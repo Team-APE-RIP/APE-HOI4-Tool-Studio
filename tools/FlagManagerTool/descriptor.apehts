@@ -1,9 +1,9 @@
+id="10000003"
 name="FlagManagerTool"
-version="3.2.0"
-supported_version="2.2.*"
+version="4.0.1"
+supported_version="2.3.*"
 author="Team APE:RIP"
 dependencies={
-    "DirectXMath"
-    "DirectXTex"
+    "Lumorpha"
     "APEHOI4Parser"
 }

@@ -88,12 +88,21 @@ signals:
 protected:
     void showEvent(QShowEvent *event) override;
     void resizeEvent(QResizeEvent *event) override;
+    bool eventFilter(QObject *obj, QEvent *event) override;
 
 private:
     void setupUi();
+    int availableCardsWidth() const;
+    int cardsPerRowForWidth(int availableWidth) const;
+    void relayoutToolCards();
     QWidget* createToolCard(ToolInterface* tool, int index, int rowIndex);
     void playDropAnimations();
     void onDropAnimationFinished(AnimatedToolCard* card);
+    void showToolCardTooltip(QWidget *cardButton, const QPoint& globalPos);
+    void hideToolCardTooltip();
+    void updateToolCardTooltipStyle();
+    void showToolCardContextMenu(ToolInterface* tool, const QPoint& globalPos);
+    void uninstallTool(const QString& toolId);
 
     QLabel *m_titleLabel;
     QPushButton *m_closeBtn;
@@ -102,6 +111,7 @@ private:
     QWidget *m_contentWidget; // Reference to scroll content for coordinate calculation
     QWidget *m_animationLayer; // Overlay layer for drop animations
     QScrollArea *m_scrollArea;
+    QLabel *m_tooltipPopup;
     
     struct ToolCardInfo {
         QString id;
@@ -113,8 +123,7 @@ private:
     };
     QList<ToolCardInfo> m_toolCards;
     int m_animationsRunning = 0;
-    
-    static const int MAX_COLS = 5;
+    int m_currentCardsPerRow = 0;
 };
 
 #endif // TOOLSPAGE_H

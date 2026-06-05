@@ -1,9 +1,15 @@
 <RCC>
     <qresource prefix="/">
         <file>app.ico</file>
+        <file>splash/startup_hero_placeholder.png</file>
+        <file>splash/aperip-product.svg</file>
+        <file>splash/ape-wordmark.svg</file>
+        <file>splash/startup_contributors.proto</file>
+        <file>package_registry.proto</file>
 
         <file>icons/palette.svg</file>
         <file>icons/globe.svg</file>
+        <file>icons/interface-language.svg</file>
         <file>icons/sidebar.svg</file>
         <file>icons/bug.svg</file>
         <file>icons/pin.svg</file>
@@ -20,6 +26,20 @@
         <file>icons/eye.svg</file>
         <file>icons/eye-off.svg</file>
         <file>icons/search.svg</file>
+        <file>icons/monitor.svg</file>
+        <file>icons/resolution.svg</file>
+        <file>icons/close-app.svg</file>
+        <file>icons/close-tool.svg</file>
+        <file>icons/exit-fullscreen.svg</file>
+
+        <file alias="toolhost/TopBar.qml">qml/toolhost/TopBar.qml</file>
+        <file alias="toolhost/StatusBar.qml">qml/toolhost/StatusBar.qml</file>
+        <file alias="toolhost/LoadingOverlay.qml">qml/toolhost/LoadingOverlay.qml</file>
+        <file alias="toolhost/MacScrollBar.qml">qml/toolhost/MacScrollBar.qml</file>
+        <file alias="toolhost/FormTextField.qml">qml/toolhost/FormTextField.qml</file>
+        <file alias="toolhost/FormSpinBox.qml">qml/toolhost/FormSpinBox.qml</file>
+        <file alias="toolhost/FormCheckBox.qml">qml/toolhost/FormCheckBox.qml</file>
+        <file alias="toolhost/ThemedToolTip.qml">qml/toolhost/ThemedToolTip.qml</file>
 
         <file>openSource.json</file>
         <file>UserAgreement/version.json</file>

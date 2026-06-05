@@ -9,12 +9,13 @@
 #include "ToolManager.h"
 #include "ToolProxyInterface.h"
 #include "ToolDescriptorParser.h"
+#include "PackageRegistry.h"
 #include "Logger.h"
 #include <QDir>
 #include <QCoreApplication>
 #include <QDebug>
-#include <QPluginLoader>
 #include <QFile>
+#include <QFileInfo>
 #include <QStringList>
 
 namespace {
@@ -61,6 +62,31 @@ bool isVersionCompatible(const QString& appVersion, const QString& requirement) 
     }
     return false;
 }
+
+QString toolBinaryExtension() {
+#if defined(Q_OS_WIN)
+    return QStringLiteral(".dll");
+#elif defined(Q_OS_MACOS) || defined(Q_OS_MAC)
+    return QStringLiteral(".dylib");
+#else
+    return QStringLiteral(".so");
+#endif
+}
+
+QString resolveToolBinaryPath(const QDir& toolDir, const QString& toolName) {
+    const QString trimmedToolName = toolName.trimmed();
+    if (trimmedToolName.isEmpty()) {
+        return QString();
+    }
+
+    const QString candidatePath = toolDir.filePath(trimmedToolName + toolBinaryExtension());
+    const QFileInfo candidateInfo(candidatePath);
+    if (!candidateInfo.exists() || !candidateInfo.isFile()) {
+        return QString();
+    }
+
+    return candidateInfo.absoluteFilePath();
+}
 }
 
 ToolManager::ToolManager() {}
@@ -70,76 +96,85 @@ ToolManager& ToolManager::instance() {
     return instance;
 }
 
-void ToolManager::setProcessIsolationEnabled(bool enabled) {
-    m_processIsolationEnabled = enabled;
+void ToolManager::setQuestionDialogHandler(
+    std::function<void(const QString&, const QString&, std::function<void(bool)>)> handler) {
+    m_questionDialogHandler = std::move(handler);
+}
+
+ToolProxyInterface* ToolManager::getActiveToolProxy() const {
+    return m_activeToolProxy;
+}
+
+void ToolManager::setActiveToolProxy(ToolProxyInterface* proxy) {
+    if (m_activeToolProxy == proxy) {
+        return;
+    }
+
+    const QString previousId = m_activeToolProxy ? m_activeToolProxy->id() : QStringLiteral("<none>");
+    const QString nextId = proxy ? proxy->id() : QStringLiteral("<none>");
+    Logger::instance().logInfo(
+        "ToolManager",
+        QString("Active tool proxy changed from %1 to %2").arg(previousId, nextId)
+    );
+    m_activeToolProxy = proxy;
 }
 
 void ToolManager::loadTools() {
     m_tools.clear();
     m_toolMap.clear();
     m_isToolActive = false;
-    m_activeToolProxy = nullptr;
+    setActiveToolProxy(nullptr);
 
-    if (m_processIsolationEnabled) {
-        loadToolsWithIsolation();
-    } else {
-        loadToolsDirectly();
-    }
+    loadToolProxies();
 }
 
-void ToolManager::loadToolsWithIsolation() {
-    // Determine the path to the 'tools' directory
-    QDir appDir(QCoreApplication::applicationDirPath());
-    
-    // Check for 'tools' directory in the same directory as the executable
-    if (appDir.exists("tools")) {
-        appDir.cd("tools");
-    } else {
-        // Fallback: Check if we are in bin/debug/release and tools is one level up
-        QDir parentDir = appDir;
-        if (parentDir.cdUp() && parentDir.exists("tools")) {
-            appDir = parentDir;
-            appDir.cd("tools");
-        } else {
-            Logger::instance().logInfo("ToolManager", "Tools directory not found.");
-            return;
-        }
+void ToolManager::loadToolProxies() {
+    const QList<RegisteredPackage> registeredTools = PackageRegistry::registeredPackages(PackageKind::Tool);
+    if (registeredTools.isEmpty()) {
+        Logger::instance().logInfo("ToolManager", "No registered tools found.");
     }
 
-    Logger::instance().logInfo("ToolManager", "Scanning tools (isolation mode) in: " + appDir.absolutePath());
-
-    // Iterate over subdirectories (each tool in its own folder)
-    const QStringList subDirs = appDir.entryList(QDir::Dirs | QDir::NoDotAndDotDot);
-    
-    if (subDirs.isEmpty()) {
-        Logger::instance().logInfo("ToolManager", "No tool subdirectories found.");
-    }
-
-    for (const QString &dirName : subDirs) {
-        QDir toolDir(appDir.filePath(dirName));
+    for (const RegisteredPackage& registeredTool : registeredTools) {
+        QDir toolDir(registeredTool.directoryPath);
         Logger::instance().logInfo("ToolManager", "Checking directory: " + toolDir.absolutePath());
         
-        // Check for descriptor.apehts first
-        QString metadataPath = toolDir.filePath("descriptor.apehts");
-        if (!QFile::exists(metadataPath)) {
-            Logger::instance().logInfo("ToolManager", "No descriptor.apehts found in: " + dirName);
-            continue;
-        }
-        
-        // Look for library files
-        const QStringList files = toolDir.entryList(QStringList() << "*.dll" << "*.so" << "*.dylib", QDir::Files);
-        
-        if (files.isEmpty()) {
-            Logger::instance().logInfo("ToolManager", "No plugin files found in: " + dirName);
+        const QString descriptorPath = toolDir.filePath("descriptor.apehts");
+        QJsonObject metaData;
+        QString errorMessage;
+        if (!ToolDescriptorParser::parseDescriptorFile(descriptorPath, metaData, &errorMessage)) {
+            Logger::instance().logWarning("ToolManager", errorMessage);
             continue;
         }
 
-        // Use the first library file found
-        QString filePath = toolDir.filePath(files.first());
-        Logger::instance().logInfo("ToolManager", "Creating proxy for plugin: " + filePath);
-        
-        // Create proxy interface
+        const QString toolId = metaData.value("id").toString().trimmed();
+        const QString toolName = metaData.value("name").toString().trimmed();
+        if (toolId != registeredTool.id) {
+            Logger::instance().logWarning(
+                "ToolManager",
+                QString("Tool registry ID does not match descriptor ID: %1 != %2")
+                    .arg(registeredTool.id, toolId)
+            );
+            continue;
+        }
+
+        const QString filePath = resolveToolBinaryPath(toolDir, toolName);
+        if (filePath.trimmed().isEmpty()) {
+            Logger::instance().logWarning(
+                "ToolManager",
+                QString("Expected tool worker binary not found for %1: %2")
+                    .arg(toolName, toolDir.filePath(toolName + toolBinaryExtension()))
+            );
+            continue;
+        }
+
+        Logger::instance().logInfo(
+            "ToolManager",
+            QString("Creating tool proxy for plugin: %1")
+                .arg(filePath)
+        );
+
         ToolProxyInterface* proxy = new ToolProxyInterface(filePath, toolDir.absolutePath(), this);
+        proxy->setMetaData(metaData);
         proxy->preloadInfo();
         
         if (!proxy->isInfoLoaded()) {
@@ -162,13 +197,25 @@ void ToolManager::loadToolsWithIsolation() {
 
         // Check if already loaded (by ID)
         if (m_toolMap.contains(proxy->id())) {
-            Logger::instance().logWarning("ToolManager", "Duplicate tool ID found: " + proxy->id() + ". Skipping " + files.first());
+            Logger::instance().logWarning("ToolManager", "Duplicate tool ID found: " + proxy->id() + ". Skipping " + filePath);
             delete proxy;
             continue; 
         }
         
         // Connect crash signal
         connect(proxy, &ToolProxyInterface::processCrashed, this, [this, proxy](const QString& error) {
+            if (proxy != m_activeToolProxy) {
+                Logger::instance().logWarning(
+                    "ToolManager",
+                    QString("Ignoring crash from non-active proxy %1").arg(proxy->id())
+                );
+                return;
+            }
+
+            Logger::instance().logError(
+                "ToolManager",
+                QString("Active tool proxy crashed: %1 (%2)").arg(proxy->id(), error)
+            );
             emit toolProcessCrashed(proxy->id(), error);
         });
         
@@ -178,98 +225,7 @@ void ToolManager::loadToolsWithIsolation() {
         Logger::instance().logInfo("ToolManager", "Loaded tool (proxy): " + proxy->name() + " (" + proxy->id() + ")");
     }
     
-    Logger::instance().logInfo("ToolManager", QString("Total tools loaded (isolation mode): %1").arg(m_tools.size()));
-    emit toolsLoaded();
-}
-
-void ToolManager::loadToolsDirectly() {
-    // Original direct loading logic (kept for fallback/debugging)
-    QDir appDir(QCoreApplication::applicationDirPath());
-    
-    if (appDir.exists("tools")) {
-        appDir.cd("tools");
-    } else {
-        QDir parentDir = appDir;
-        if (parentDir.cdUp() && parentDir.exists("tools")) {
-            appDir = parentDir;
-            appDir.cd("tools");
-        } else {
-            Logger::instance().logInfo("ToolManager", "Tools directory not found.");
-            return;
-        }
-    }
-
-    Logger::instance().logInfo("ToolManager", "Scanning tools (direct mode) in: " + appDir.absolutePath());
-
-    const QStringList subDirs = appDir.entryList(QDir::Dirs | QDir::NoDotAndDotDot);
-    
-    if (subDirs.isEmpty()) {
-        Logger::instance().logInfo("ToolManager", "No tool subdirectories found.");
-    }
-
-    for (const QString &dirName : subDirs) {
-        QDir toolDir(appDir.filePath(dirName));
-        Logger::instance().logInfo("ToolManager", "Checking directory: " + toolDir.absolutePath());
-        
-        const QStringList files = toolDir.entryList(QStringList() << "*.dll" << "*.so" << "*.dylib", QDir::Files);
-        
-        if (files.isEmpty()) {
-            Logger::instance().logInfo("ToolManager", "No plugin files found in: " + dirName);
-        }
-
-        for (const QString &fileName : files) {
-            QString filePath = toolDir.filePath(fileName);
-            Logger::instance().logInfo("ToolManager", "Attempting to load plugin: " + filePath);
-            
-            QPluginLoader loader(filePath);
-            QObject *plugin = loader.instance();
-            
-            if (plugin) {
-                ToolInterface *tool = qobject_cast<ToolInterface *>(plugin);
-                if (tool) {
-                    // Inject metadata from descriptor.apehts
-                    QJsonObject metaData;
-                    QString errorMessage;
-                    const QString descriptorPath = toolDir.filePath("descriptor.apehts");
-                    if (!ToolDescriptorParser::parseDescriptorFile(descriptorPath, metaData, &errorMessage)) {
-                        Logger::instance().logWarning("ToolManager", errorMessage);
-                        continue;
-                    }
-                    tool->setMetaData(metaData);
-
-                    // Version Check
-                    QString appVersion = APP_VERSION;
-                    QString requiredVersion = tool->compatibleVersion();
-                    if (!isVersionCompatible(appVersion, requiredVersion)) {
-                        Logger::instance().logWarning("ToolManager", 
-                            QString("Version mismatch for tool %1: Requires App v%2, Current App v%3")
-                            .arg(tool->id()).arg(requiredVersion).arg(appVersion));
-                    } else {
-                        Logger::instance().logInfo("ToolManager", 
-                            QString("Tool %1 version check passed (v%2)").arg(tool->id()).arg(requiredVersion));
-                    }
-
-                    // Check if already loaded (by ID)
-                    if (m_toolMap.contains(tool->id())) {
-                        Logger::instance().logWarning("ToolManager", "Duplicate tool ID found: " + tool->id() + ". Skipping " + fileName);
-                        continue; 
-                    }
-                    
-                    tool->initialize();
-                    m_tools.append(tool);
-                    m_toolMap.insert(tool->id(), tool);
-                    Logger::instance().logInfo("ToolManager", "Loaded tool: " + tool->name() + " (" + tool->id() + ")");
-                } else {
-                    Logger::instance().logError("ToolManager", "Plugin is not a ToolInterface: " + fileName);
-                    delete plugin;
-                }
-            } else {
-                Logger::instance().logError("ToolManager", "Failed to load plugin: " + fileName + ". Error: " + loader.errorString());
-            }
-        }
-    }
-    
-    Logger::instance().logInfo("ToolManager", QString("Total tools loaded (direct mode): %1").arg(m_tools.size()));
+    Logger::instance().logInfo("ToolManager", QString("Total tools loaded: %1").arg(m_tools.size()));
     emit toolsLoaded();
 }
 
@@ -288,7 +244,7 @@ bool ToolManager::isToolActive() const {
 void ToolManager::setToolActive(bool active) {
     m_isToolActive = active;
     if (!active) {
-        m_activeToolProxy = nullptr;
+        setActiveToolProxy(nullptr);
     }
 }
 
@@ -303,7 +259,7 @@ void ToolManager::unloadTools() {
     }
     
     m_isToolActive = false;
-    m_activeToolProxy = nullptr;
+    setActiveToolProxy(nullptr);
     
     Logger::instance().logInfo("ToolManager", "All tools unloaded");
 }
@@ -344,7 +300,7 @@ bool ToolManager::unloadToolsAndWait(int timeoutMsPerTool) {
     }
 
     m_isToolActive = false;
-    m_activeToolProxy = nullptr;
+    setActiveToolProxy(nullptr);
 
     Logger::instance().logInfo(
         "ToolManager",
@@ -353,7 +309,14 @@ bool ToolManager::unloadToolsAndWait(int timeoutMsPerTool) {
     return allStopped;
 }
 
-void ToolManager::requestQuestionDialog(const QString& title, const QString& message, 
+void ToolManager::requestQuestionDialog(const QString& title, const QString& message,
                                          std::function<void(bool)> callback) {
-    emit questionDialogRequested(title, message, callback);
+    if (m_questionDialogHandler) {
+        m_questionDialogHandler(title, message, std::move(callback));
+        return;
+    }
+
+    if (callback) {
+        callback(false);
+    }
 }

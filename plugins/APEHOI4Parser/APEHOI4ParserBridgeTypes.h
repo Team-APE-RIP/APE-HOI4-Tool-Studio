@@ -58,12 +58,18 @@ enum APEHOI4ParserDocumentKind {
     APE_HOI4_PARSER_DOCUMENT_UNKNOWN = 0,
     APE_HOI4_PARSER_DOCUMENT_LOCALIZATION = 1,
     APE_HOI4_PARSER_DOCUMENT_TAGS = 2,
-    APE_HOI4_PARSER_DOCUMENT_FOCUS = 3
+    APE_HOI4_PARSER_DOCUMENT_FOCUS = 3,
+    APE_HOI4_PARSER_DOCUMENT_FONT_GFX = 4
 };
 
 enum APEHOI4ParserCountryTagQueryFlags {
     APE_HOI4_PARSER_COUNTRY_TAG_QUERY_EXCLUDE_DYNAMIC = 0,
     APE_HOI4_PARSER_COUNTRY_TAG_QUERY_INCLUDE_DYNAMIC = 1
+};
+
+enum APEHOI4ParserFontQueryFlags {
+    APE_HOI4_PARSER_FONT_QUERY_DEFAULT = 0,
+    APE_HOI4_PARSER_FONT_QUERY_FORCE_REFRESH = 1
 };
 
 /*
@@ -158,6 +164,23 @@ typedef struct APEHOI4ParserScriptedTriggerEntry {
     const char* idUtf8;
     APEHOI4ParserSourceRange idRange;
 } APEHOI4ParserScriptedTriggerEntry;
+
+/*
+ * Bitmap font definition extracted from HOI4 .gfx files.
+ * colorUtf8 is the raw bitmapfont color value when present.
+ * fontFilesUtf8 is a semicolon-separated list of font path bases or file paths.
+ * languagesUtf8 is a semicolon-separated list of game language keys from bitmapfont_override.
+ * textColorsUtf8 is a semicolon-separated list of code=R,G,B items after global textcolors are merged with font-local overrides.
+ */
+typedef struct APEHOI4ParserFontEntry {
+    const char* nameUtf8;
+    const char* pathUtf8;
+    const char* colorUtf8;
+    const char* fontFilesUtf8;
+    const char* languagesUtf8;
+    const char* textColorsUtf8;
+    APEHOI4ParserSourceRange nameRange;
+} APEHOI4ParserFontEntry;
 
 /*
  * Generic parser statistics for profiling and host-side inspection.

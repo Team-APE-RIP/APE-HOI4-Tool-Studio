@@ -1,0 +1,9 @@
+id="10000004"
+name="FontManagerTool"
+version="1.0.2"
+supported_version="2.3.*"
+author="Team APE:RIP"
+dependencies={
+    "APEHOI4Parser"
+    "DryadAtlas"
+}

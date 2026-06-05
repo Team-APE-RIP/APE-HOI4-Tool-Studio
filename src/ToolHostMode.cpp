@@ -7,34 +7,91 @@
 // https://github.com/Team-APE-RIP/APE-HOI4-Tool-Studio/
 //-------------------------------------------------------------------------------------
 #include "ToolHostMode.h"
-#include "ToolInterface.h"
 #include "ToolIpcProtocol.h"
 #include "FileManager.h"
 #include "ConfigManager.h"
+#include "LocalizationManager.h"
 #include "Logger.h"
 #include "ToolDescriptorParser.h"
+#include "PluginRuntimeContext.h"
 #include "ToolRuntimeContext.h"
+#include "ToolWorkerInterface.h"
 
 #include <QApplication>
+#include <QLibrary>
 #include <QLocalSocket>
-#include <QPluginLoader>
 #include <QDir>
 #include <QTimer>
-#include <QWidget>
-#include <QWindow>
 #include <QDebug>
 #include <QJsonDocument>
 #include <QJsonObject>
 #include <QJsonArray>
 #include <QFile>
+#include <QList>
 #include <QEventLoop>
 #include <QThread>
 #include <QElapsedTimer>
 #include <QDateTime>
 
+#include <utility>
+
 #ifdef Q_OS_WIN
 #include <windows.h>
 #endif
+
+namespace {
+using WorkerCreateFn = ToolWorkerHandle (*)(const char*);
+using WorkerDestroyFn = void (*)(ToolWorkerHandle);
+using WorkerInitializeFn = ToolWorkerResult (*)(ToolWorkerHandle, const char*);
+using WorkerHandleActionFn = const char* (*)(ToolWorkerHandle, const char*, const char*, const char*, ToolWorkerResult*);
+using WorkerGetStateFn = const char* (*)(ToolWorkerHandle, ToolWorkerResult*);
+using WorkerGetLastErrorFn = const char* (*)(ToolWorkerHandle);
+using WorkerFreeStringFn = void (*)(const char*);
+using WorkerGetVersionFn = const char* (*)();
+
+QJsonObject jsonObjectFromUtf8(const char* jsonText) {
+    if (!jsonText || *jsonText == '\0') {
+        return QJsonObject();
+    }
+
+    const QJsonDocument document = QJsonDocument::fromJson(QByteArray(jsonText));
+    return document.isObject() ? document.object() : QJsonObject();
+}
+
+QJsonObject stringMapToJsonObject(const QMap<QString, QString>& strings) {
+    QVariantMap variantMap;
+    for (auto iterator = strings.constBegin(); iterator != strings.constEnd(); ++iterator) {
+        variantMap.insert(iterator.key(), iterator.value());
+    }
+    return QJsonObject::fromVariantMap(variantMap);
+}
+
+ToolRuntimeContext::FileRoot toToolFileRoot(PluginRuntimeContext::FileRoot root) {
+    switch (root) {
+    case PluginRuntimeContext::FileRoot::Game:
+        return ToolRuntimeContext::FileRoot::Game;
+    case PluginRuntimeContext::FileRoot::Mod:
+        return ToolRuntimeContext::FileRoot::Mod;
+    case PluginRuntimeContext::FileRoot::Doc:
+        return ToolRuntimeContext::FileRoot::Doc;
+    default:
+        return ToolRuntimeContext::FileRoot::Unknown;
+    }
+}
+
+PluginRuntimeContext::EffectiveFileSource toPluginEffectiveFileSource(ToolRuntimeContext::EffectiveFileSource source) {
+    switch (source) {
+    case ToolRuntimeContext::EffectiveFileSource::Game:
+        return PluginRuntimeContext::EffectiveFileSource::Game;
+    case ToolRuntimeContext::EffectiveFileSource::Mod:
+        return PluginRuntimeContext::EffectiveFileSource::Mod;
+    case ToolRuntimeContext::EffectiveFileSource::Dlc:
+        return PluginRuntimeContext::EffectiveFileSource::Dlc;
+    default:
+        return PluginRuntimeContext::EffectiveFileSource::Unknown;
+    }
+}
+} // namespace
 
 class ToolHostApp : public QObject {
     Q_OBJECT
@@ -43,9 +100,6 @@ public:
         : QObject(parent)
         , m_serverName(serverName)
         , m_toolPath(toolPath)
-        , m_tool(nullptr)
-        , m_mainWidget(nullptr)
-        , m_sidebarWidget(nullptr)
         , m_requestId(0)
         , m_dataReady(false)
         , m_connectRetryCount(0)
@@ -64,36 +118,33 @@ public:
     }
     
     bool loadTool() {
-        QPluginLoader loader(m_toolPath);
-        QObject* plugin = loader.instance();
-        
-        if (!plugin) {
-            qCritical() << "Failed to load plugin:" << loader.errorString();
-            return false;
-        }
-        
-        m_tool = qobject_cast<ToolInterface*>(plugin);
-        if (!m_tool) {
-            qCritical() << "Plugin does not implement ToolInterface";
-            delete plugin;
-            return false;
-        }
-        
-        // Load metadata
         QFileInfo fi(m_toolPath);
-        QString metadataPath = fi.absolutePath() + "/descriptor.apehts";
+        const QString metadataPath = fi.absolutePath() + "/descriptor.apehts";
         QJsonObject metaData;
         QString errorMessage;
-        if (ToolDescriptorParser::parseDescriptorFile(metadataPath, metaData, &errorMessage)) {
-            m_tool->setMetaData(metaData);
-        } else {
+        if (!ToolDescriptorParser::parseDescriptorFile(metadataPath, metaData, &errorMessage)) {
             qCritical() << errorMessage;
             return false;
         }
-        
-        ToolRuntimeContext::instance().setPluginBinaryPathResolver(
-            [this](const QString& pluginName, QString* outPath, QString* errorMessage) {
-                return requestAuthorizedPluginBinaryPath(pluginName, outPath, errorMessage);
+
+        m_toolInfo.id = metaData.value("id").toString();
+        m_toolInfo.name = metaData.value("name").toString();
+        m_toolInfo.version = metaData.value("version").toString();
+        m_toolInfo.compatibleVersion = metaData.value("compatibleVersion").toString();
+        m_toolInfo.author = metaData.value("author").toString();
+        m_toolInfo.dependencies = ToolDescriptorParser::extractDependencies(metaData);
+
+        ToolRuntimeContext::instance().setPluginInvoker(
+            [this](const ToolRuntimeContext::PluginInvokeRequest& request) {
+                return requestInvokePlugin(request);
+            }
+        );
+        ToolRuntimeContext::instance().setMatchingTextFileReader(
+            [this](ToolRuntimeContext::FileRoot root,
+                   const QString& relativePath,
+                   const QString& regexPattern,
+                   bool recursive) {
+                return requestMatchingTextFiles(root, relativePath, regexPattern, recursive);
             }
         );
         ToolRuntimeContext::instance().setBinaryFileReader(
@@ -114,6 +165,16 @@ public:
         ToolRuntimeContext::instance().setEffectiveTextFileReader(
             [this](const QString& relativePath) {
                 return requestEffectiveTextFile(relativePath);
+            }
+        );
+        ToolRuntimeContext::instance().setEffectiveTextFilesReader(
+            [this](const QString& relativeRoot, const QString& suffixFilter) {
+                return requestEffectiveTextFiles(relativeRoot, suffixFilter);
+            }
+        );
+        ToolRuntimeContext::instance().setEffectiveFileEnumerator(
+            [this](const QString& relativeRoot, const QString& suffixFilter) {
+                return requestListEffectiveFiles(relativeRoot, suffixFilter);
             }
         );
         ToolRuntimeContext::instance().setBinaryFileWriter(
@@ -141,9 +202,141 @@ public:
                 return requestListDirectory(root, relativePath, recursive);
             }
         );
+        PluginRuntimeContext::instance().setBinaryFileReader(
+            [this](PluginRuntimeContext::FileRoot root, const QString& relativePath) {
+                const ToolRuntimeContext::FileReadResult runtimeResult =
+                    requestBinaryFile(toToolFileRoot(root), relativePath);
+                return PluginRuntimeContext::FileReadResult{
+                    runtimeResult.success,
+                    runtimeResult.content,
+                    runtimeResult.errorMessage
+                };
+            }
+        );
+        PluginRuntimeContext::instance().setTextFileReader(
+            [this](PluginRuntimeContext::FileRoot root, const QString& relativePath) {
+                const ToolRuntimeContext::TextReadResult runtimeResult =
+                    requestTextFile(toToolFileRoot(root), relativePath);
+                return PluginRuntimeContext::TextReadResult{
+                    runtimeResult.success,
+                    runtimeResult.content,
+                    runtimeResult.errorMessage
+                };
+            }
+        );
+        PluginRuntimeContext::instance().setEffectiveBinaryFileReader(
+            [this](const QString& relativePath) {
+                const ToolRuntimeContext::FileReadResult runtimeResult = requestEffectiveBinaryFile(relativePath);
+                return PluginRuntimeContext::FileReadResult{
+                    runtimeResult.success,
+                    runtimeResult.content,
+                    runtimeResult.errorMessage
+                };
+            }
+        );
+        PluginRuntimeContext::instance().setEffectiveTextFileReader(
+            [this](const QString& relativePath) {
+                const ToolRuntimeContext::TextReadResult runtimeResult = requestEffectiveTextFile(relativePath);
+                return PluginRuntimeContext::TextReadResult{
+                    runtimeResult.success,
+                    runtimeResult.content,
+                    runtimeResult.errorMessage
+                };
+            }
+        );
+        PluginRuntimeContext::instance().setEffectiveTextFilesReader(
+            [this](const QString& relativeRoot, const QString& suffixFilter) {
+                const ToolRuntimeContext::MatchingTextFilesResult runtimeResult =
+                    requestEffectiveTextFiles(relativeRoot, suffixFilter);
+                PluginRuntimeContext::MatchingTextFilesResult result;
+                result.success = runtimeResult.success;
+                result.errorMessage = runtimeResult.errorMessage;
+                result.entries.reserve(runtimeResult.entries.size());
+                for (const ToolRuntimeContext::TextFileMatchEntry& runtimeEntry : runtimeResult.entries) {
+                    PluginRuntimeContext::TextFileMatchEntry entry;
+                    entry.relativePath = runtimeEntry.relativePath;
+                    entry.name = runtimeEntry.name;
+                    entry.content = runtimeEntry.content;
+                    result.entries.append(std::move(entry));
+                }
+                return result;
+            }
+        );
+        PluginRuntimeContext::instance().setEffectiveFileEnumerator(
+            [this](const QString& relativeRoot, const QString& suffixFilter) {
+                const ToolRuntimeContext::EffectiveFileListResult runtimeResult =
+                    requestListEffectiveFiles(relativeRoot, suffixFilter);
+                PluginRuntimeContext::EffectiveFileListResult result;
+                result.success = runtimeResult.success;
+                result.errorMessage = runtimeResult.errorMessage;
+                result.entries.reserve(runtimeResult.entries.size());
+                for (const ToolRuntimeContext::EffectiveFileEntry& runtimeEntry : runtimeResult.entries) {
+                    PluginRuntimeContext::EffectiveFileEntry entry;
+                    entry.logicalPath = runtimeEntry.logicalPath;
+                    entry.source = toPluginEffectiveFileSource(runtimeEntry.source);
+                    entry.lastModifiedMs = runtimeEntry.lastModifiedMs;
+                    result.entries.append(entry);
+                }
+                return result;
+            }
+        );
 
-        m_tool->initialize();
-        qDebug() << "Tool loaded:" << m_tool->id();
+        m_workerLibrary.setFileName(m_toolPath);
+        if (!m_workerLibrary.load()) {
+            qCritical() << "Failed to load worker library:" << m_workerLibrary.errorString();
+            return false;
+        }
+
+        m_workerCreate = reinterpret_cast<WorkerCreateFn>(m_workerLibrary.resolve("ToolWorker_Create"));
+        m_workerDestroy = reinterpret_cast<WorkerDestroyFn>(m_workerLibrary.resolve("ToolWorker_Destroy"));
+        m_workerInitialize = reinterpret_cast<WorkerInitializeFn>(m_workerLibrary.resolve("ToolWorker_Initialize"));
+        m_workerHandleAction = reinterpret_cast<WorkerHandleActionFn>(m_workerLibrary.resolve("ToolWorker_HandleAction"));
+        m_workerGetCurrentState = reinterpret_cast<WorkerGetStateFn>(m_workerLibrary.resolve("ToolWorker_GetCurrentState"));
+        m_workerGetInitialState = reinterpret_cast<WorkerGetStateFn>(m_workerLibrary.resolve("ToolWorker_GetInitialState"));
+        m_workerGetLastError = reinterpret_cast<WorkerGetLastErrorFn>(m_workerLibrary.resolve("ToolWorker_GetLastError"));
+        m_workerFreeString = reinterpret_cast<WorkerFreeStringFn>(m_workerLibrary.resolve("ToolWorker_FreeString"));
+        m_workerGetVersion = reinterpret_cast<WorkerGetVersionFn>(m_workerLibrary.resolve("ToolWorker_GetVersion"));
+
+        if (!m_workerCreate || !m_workerDestroy || !m_workerInitialize || !m_workerHandleAction
+            || !m_workerGetCurrentState || !m_workerGetInitialState || !m_workerFreeString) {
+            qCritical() << "Worker library is missing required ToolWorkerInterface exports:" << m_toolPath;
+            m_workerLibrary.unload();
+            return false;
+        }
+
+        const QByteArray toolIdUtf8 = m_toolInfo.id.toUtf8();
+        m_workerHandle = m_workerCreate(toolIdUtf8.constData());
+        if (!m_workerHandle) {
+            qCritical() << "Worker create failed for tool:" << m_toolInfo.id;
+            m_workerLibrary.unload();
+            return false;
+        }
+
+        const QString languageCode = ConfigManager::instance().getLanguage();
+        QJsonObject initConfig = ConfigManager::instance().toJson();
+        initConfig[QStringLiteral("toolDirectory")] = fi.absolutePath();
+        initConfig[QStringLiteral("language")] = languageCode;
+        initConfig[QStringLiteral("localizedStrings")] = stringMapToJsonObject(
+            LocalizationManager::instance().loadToolStrings(fi.absolutePath(), languageCode)
+        );
+        const QByteArray initJson = QJsonDocument(initConfig).toJson(QJsonDocument::Compact);
+        const ToolWorkerResult initResult = m_workerInitialize(m_workerHandle, initJson.constData());
+        if (initResult != TOOL_WORKER_SUCCESS) {
+            const QString workerError = m_workerGetLastError
+                ? QString::fromUtf8(m_workerGetLastError(m_workerHandle))
+                : QStringLiteral("Unknown worker initialization error");
+            qCritical() << "Worker initialize failed:" << workerError;
+            m_workerDestroy(m_workerHandle);
+            m_workerHandle = nullptr;
+            m_workerLibrary.unload();
+            return false;
+        }
+
+        m_workerMode = true;
+        if (m_workerGetVersion && m_toolInfo.version.isEmpty()) {
+            m_toolInfo.version = QString::fromUtf8(m_workerGetVersion());
+        }
+        qDebug() << "Tool loaded as worker library:" << m_toolInfo.id;
         return true;
     }
     
@@ -170,13 +363,7 @@ private slots:
         m_heartbeatTimer->start(ToolIpc::HEARTBEAT_INTERVAL_MS);
         
         // Send ready signal with tool info FIRST (don't block)
-        ToolIpc::ToolInfo info;
-        info.id = m_tool->id();
-        info.name = m_tool->name();
-        info.description = m_tool->description();
-        info.version = m_tool->version();
-        info.compatibleVersion = m_tool->compatibleVersion();
-        info.author = m_tool->author();
+        ToolIpc::ToolInfo info = m_toolInfo;
         
         QJsonObject payload;
         payload["toolInfo"] = info.toJson();
@@ -252,6 +439,14 @@ private slots:
     }
     
     void onReadyRead() {
+        processAvailableMessages();
+    }
+
+    void processAvailableMessages() {
+        if (!m_socket) {
+            return;
+        }
+
         m_buffer.append(m_socket->readAll());
         
         while (m_buffer.size() >= 4) {
@@ -280,26 +475,6 @@ private:
         case ToolIpc::MessageType::HeartbeatAck:
             break;
             
-        case ToolIpc::MessageType::CreateWidget:
-            handleCreateWidget(msg);
-            break;
-            
-        case ToolIpc::MessageType::CreateSidebarWidget:
-            handleCreateSidebarWidget(msg);
-            break;
-            
-        case ToolIpc::MessageType::DestroyWidget:
-            handleDestroyWidget(msg);
-            break;
-            
-        case ToolIpc::MessageType::ShowWidget:
-            handleShowWidget(msg);
-            break;
-            
-        case ToolIpc::MessageType::ResizeWidget:
-            handleResizeWidget(msg);
-            break;
-            
         case ToolIpc::MessageType::LoadLanguage:
             handleLoadLanguage(msg);
             break;
@@ -311,6 +486,14 @@ private:
         case ToolIpc::MessageType::GetToolInfo:
             handleGetToolInfo(msg);
             break;
+
+        case ToolIpc::MessageType::UiAction:
+            handleUiActionMessage(msg);
+            break;
+
+        case ToolIpc::MessageType::StateQuery:
+            handleStateQueryMessage(msg);
+            break;
             
         case ToolIpc::MessageType::Shutdown:
             qDebug() << "Shutdown requested";
@@ -319,16 +502,19 @@ private:
             
         case ToolIpc::MessageType::ConfigResponse:
         case ToolIpc::MessageType::FileIndexResponse:
-        case ToolIpc::MessageType::PluginBinaryPathResponse:
+        case ToolIpc::MessageType::InvokePluginResponse:
+        case ToolIpc::MessageType::ReadMatchingTextFilesResponse:
         case ToolIpc::MessageType::ReadBinaryFileResponse:
         case ToolIpc::MessageType::ReadTextFileResponse:
         case ToolIpc::MessageType::ReadEffectiveBinaryFileResponse:
         case ToolIpc::MessageType::ReadEffectiveTextFileResponse:
+        case ToolIpc::MessageType::ReadEffectiveTextFilesResponse:
         case ToolIpc::MessageType::WriteBinaryFileResponse:
         case ToolIpc::MessageType::WriteTextFileResponse:
         case ToolIpc::MessageType::RemovePathResponse:
         case ToolIpc::MessageType::EnsureDirectoryResponse:
         case ToolIpc::MessageType::ListDirectoryResponse:
+        case ToolIpc::MessageType::ListEffectiveFilesResponse:
             handleDataResponse(msg);
             break;
             
@@ -338,341 +524,263 @@ private:
         }
     }
     
-    void handleCreateWidget(const ToolIpc::Message& msg) {
-        Logger::instance().logInfo("ToolHost", "handleCreateWidget called");
-        
-        if (m_mainWidget) {
-            Logger::instance().logInfo("ToolHost", "Deleting existing widget");
-            delete m_mainWidget;
-            m_mainWidget = nullptr;
-        }
-        
-        // Wait for data to be ready before creating widget
-        if (!m_dataReady) {
-            Logger::instance().logInfo("ToolHost", "Waiting for data before creating widget...");
-            int waitCount = 0;
-            const int maxWait = 100;
-            while (!m_dataReady && waitCount < maxWait) {
-                QCoreApplication::processEvents(QEventLoop::AllEvents, 10);
-                QThread::msleep(40);
-                waitCount++;
-            }
-            if (m_dataReady) {
-                Logger::instance().logInfo("ToolHost", "Data ready, creating widget");
-            } else {
-                Logger::instance().logWarning("ToolHost", "Data not ready after timeout, creating widget anyway");
-            }
-        }
-        
-        Logger::instance().logInfo("ToolHost", "Calling m_tool->createWidget(nullptr)");
-        m_mainWidget = m_tool->createWidget(nullptr);
-        
-        if (m_mainWidget) {
-            Logger::instance().logInfo("ToolHost", "Widget created successfully, setting attributes");
-            m_mainWidget->setAttribute(Qt::WA_NativeWindow);
-            m_mainWidget->setAttribute(Qt::WA_DontShowOnScreen, true); // Prevent showing on screen initially
-            
-            if (m_mainWidget->width() == 0 || m_mainWidget->height() == 0) {
-                Logger::instance().logInfo("ToolHost", "Widget has zero size, resizing to 800x600");
-                m_mainWidget->resize(800, 600);
-            }
-            
-            // Get winId first to create the native window
-            WId wid = m_mainWidget->winId();
-            Logger::instance().logInfo("ToolHost", QString("Got WinId: %1").arg(wid));
-            
-#ifdef Q_OS_WIN
-            HWND hwnd = reinterpret_cast<HWND>(wid);
-            Logger::instance().logInfo("ToolHost", QString("HWND: %1, IsWindow: %2").arg((quintptr)hwnd).arg(IsWindow(hwnd)));
-            
-            // Get current styles
-            LONG style = GetWindowLong(hwnd, GWL_STYLE);
-            LONG exStyle = GetWindowLong(hwnd, GWL_EXSTYLE);
-            Logger::instance().logInfo("ToolHost", QString("Before - Style: 0x%1, ExStyle: 0x%2").arg(style, 0, 16).arg(exStyle, 0, 16));
-            
-            // Set window styles BEFORE showing - prevent taskbar appearance and make it invisible initially
-            exStyle |= WS_EX_TOOLWINDOW;
-            exStyle &= ~WS_EX_APPWINDOW;
-            SetWindowLong(hwnd, GWL_EXSTYLE, exStyle);
-            
-            // Hide the window initially - it will be shown after embedding
-            ShowWindow(hwnd, SW_HIDE);
-            
-            LONG newExStyle = GetWindowLong(hwnd, GWL_EXSTYLE);
-            Logger::instance().logInfo("ToolHost", QString("After - ExStyle: 0x%1").arg(newExStyle, 0, 16));
-#endif
-            
-            // DO NOT call show() here - the window will be shown after embedding by the main process
-            // Just create the native window handle
-            Logger::instance().logInfo("ToolHost", "Widget prepared (not shown yet, waiting for embedding)");
-            
-            Logger::instance().logInfo("ToolHost", QString("Qt Size: %1x%2")
-                .arg(m_mainWidget->width()).arg(m_mainWidget->height()));
-            
-            ToolIpc::WindowHandle wh;
-            wh.handle = static_cast<qint64>(wid);
-            wh.width = m_mainWidget->width();
-            wh.height = m_mainWidget->height();
-            
-            QJsonObject payload;
-            payload["window"] = wh.toJson();
-            payload["success"] = true;
-            
-            Logger::instance().logInfo("ToolHost", QString("Sending CreateWidgetResponse with handle: %1").arg(wid));
-            sendMessage(ToolIpc::MessageType::CreateWidgetResponse, payload, msg.requestId);
-        } else {
-            Logger::instance().logError("ToolHost", "Widget creation FAILED");
-            QJsonObject payload;
-            payload["success"] = false;
-            payload["error"] = "Failed to create widget";
-            sendMessage(ToolIpc::MessageType::CreateWidgetResponse, payload, msg.requestId);
-        }
-    }
-    
-    void handleCreateSidebarWidget(const ToolIpc::Message& msg) {
-        if (m_sidebarWidget) {
-            delete m_sidebarWidget;
-        }
-        
-        m_sidebarWidget = m_tool->createSidebarWidget(nullptr);
-        
-        if (m_sidebarWidget) {
-            m_sidebarWidget->setAttribute(Qt::WA_NativeWindow);
-            
-            if (m_sidebarWidget->width() == 0 || m_sidebarWidget->height() == 0) {
-                m_sidebarWidget->resize(300, 600);
-            }
-            
-            // CRITICAL: Show the widget BEFORE getting winId and returning handle
-            m_sidebarWidget->show();
-            QCoreApplication::processEvents();
-            
-            WId wid = m_sidebarWidget->winId();
-            
-#ifdef Q_OS_WIN
-            HWND hwnd = reinterpret_cast<HWND>(wid);
-            LONG exStyle = GetWindowLong(hwnd, GWL_EXSTYLE);
-            exStyle |= WS_EX_TOOLWINDOW;
-            exStyle &= ~WS_EX_APPWINDOW;
-            SetWindowLong(hwnd, GWL_EXSTYLE, exStyle);
-#endif
-            
-            ToolIpc::WindowHandle wh;
-            wh.handle = static_cast<qint64>(wid);
-            wh.width = m_sidebarWidget->width();
-            wh.height = m_sidebarWidget->height();
-            
-            QJsonObject payload;
-            payload["window"] = wh.toJson();
-            payload["success"] = true;
-            
-            qDebug() << "Created sidebar widget with WinId:" << wid;
-            
-            sendMessage(ToolIpc::MessageType::CreateSidebarWidgetResponse, payload, msg.requestId);
-        } else {
-            QJsonObject payload;
-            payload["success"] = false;
-            payload["hasSidebar"] = false;
-            sendMessage(ToolIpc::MessageType::CreateSidebarWidgetResponse, payload, msg.requestId);
-        }
-    }
-    
-    void handleDestroyWidget(const ToolIpc::Message& msg) {
-        Q_UNUSED(msg);
-        if (m_mainWidget) {
-            delete m_mainWidget;
-            m_mainWidget = nullptr;
-        }
-        if (m_sidebarWidget) {
-            delete m_sidebarWidget;
-            m_sidebarWidget = nullptr;
-        }
-    }
-    
-    void handleShowWidget(const ToolIpc::Message& msg) {
-        bool showMain = msg.payload.contains("main") ? msg.payload["main"].toBool() : true;
-        bool showSidebar = msg.payload.contains("sidebar") ? msg.payload["sidebar"].toBool() : false;
-        
-        Logger::instance().logInfo("ToolHost", QString("handleShowWidget - main: %1, sidebar: %2").arg(showMain).arg(showSidebar));
-        
-        if (showMain && m_mainWidget) {
-            // Remove the DontShowOnScreen attribute now that we're ready to show
-            m_mainWidget->setAttribute(Qt::WA_DontShowOnScreen, false);
-            
-#ifdef Q_OS_WIN
-            HWND hwnd = reinterpret_cast<HWND>(m_mainWidget->winId());
-            if (IsWindow(hwnd)) {
-                // Check if the window has been embedded (has a parent)
-                HWND parent = GetParent(hwnd);
-                Logger::instance().logInfo("ToolHost", QString("Main widget parent hwnd: %1").arg((quintptr)parent));
-                
-                if (parent != NULL) {
-                    // Window is embedded - need to show it AND invalidate
-                    // The parent process has already set WS_VISIBLE style, but we need to ensure it's shown
-                    ShowWindow(hwnd, SW_SHOWNOACTIVATE);
-                    InvalidateRect(hwnd, NULL, TRUE);
-                    UpdateWindow(hwnd);
-                    RedrawWindow(hwnd, NULL, NULL, RDW_INVALIDATE | RDW_UPDATENOW | RDW_ALLCHILDREN);
-                } else {
-                    // Window not yet embedded - show it
-                    ShowWindow(hwnd, SW_SHOW);
-                    InvalidateRect(hwnd, NULL, TRUE);
-                    UpdateWindow(hwnd);
-                }
-                
-                BOOL isVisible = IsWindowVisible(hwnd);
-                RECT rect;
-                GetWindowRect(hwnd, &rect);
-                Logger::instance().logInfo("ToolHost", QString("Main widget state - hwnd: %1, visible: %2, rect: %3,%4,%5,%6")
-                    .arg((quintptr)hwnd).arg(isVisible)
-                    .arg(rect.left).arg(rect.top).arg(rect.right).arg(rect.bottom));
-            }
-#endif
-            // CRITICAL: Must call Qt show() to update Qt's internal state
-            // Even though the window is embedded, Qt needs to know it's visible
-            m_mainWidget->show();
-            m_mainWidget->update();
-            m_mainWidget->repaint();
-            QCoreApplication::processEvents();
-            
-            Logger::instance().logInfo("ToolHost", QString("Main widget Qt state - visible: %1, size: %2x%3")
-                .arg(m_mainWidget->isVisible()).arg(m_mainWidget->width()).arg(m_mainWidget->height()));
-        }
-        if (showSidebar && m_sidebarWidget) {
-#ifdef Q_OS_WIN
-            HWND hwnd = reinterpret_cast<HWND>(m_sidebarWidget->winId());
-            if (IsWindow(hwnd)) {
-                HWND parent = GetParent(hwnd);
-                if (parent != NULL) {
-                    InvalidateRect(hwnd, NULL, TRUE);
-                    UpdateWindow(hwnd);
-                } else {
-                    ShowWindow(hwnd, SW_SHOW);
-                    InvalidateRect(hwnd, NULL, TRUE);
-                    UpdateWindow(hwnd);
-                }
-            }
-#endif
-            m_sidebarWidget->update();
-            Logger::instance().logInfo("ToolHost", "Sidebar widget updated");
-        }
-        
-        QJsonObject payload;
-        payload["success"] = true;
-        sendMessage(ToolIpc::MessageType::ShowWidgetResponse, payload, msg.requestId);
-    }
-    
-    void handleResizeWidget(const ToolIpc::Message& msg) {
-        int width = msg.payload["width"].toInt();
-        int height = msg.payload["height"].toInt();
-        bool isMain = msg.payload.contains("main") ? msg.payload["main"].toBool() : true;
-        
-        Logger::instance().logInfo("ToolHost", QString("handleResizeWidget - %1x%2, main: %3").arg(width).arg(height).arg(isMain));
-        
-        QWidget* widget = isMain ? m_mainWidget : m_sidebarWidget;
-        
-        if (widget && width > 0 && height > 0) {
-            // Resize the Qt widget
-            widget->resize(width, height);
-            
-#ifdef Q_OS_WIN
-            HWND hwnd = reinterpret_cast<HWND>(widget->winId());
-            if (IsWindow(hwnd)) {
-                // Also resize via Windows API to ensure consistency
-                SetWindowPos(hwnd, NULL, 0, 0, width, height, SWP_NOMOVE | SWP_NOZORDER | SWP_NOACTIVATE);
-                InvalidateRect(hwnd, NULL, TRUE);
-                UpdateWindow(hwnd);
-            }
-#endif
-            
-            widget->update();
-            widget->repaint();
-            QCoreApplication::processEvents();
-            
-            Logger::instance().logInfo("ToolHost", QString("Widget resized to %1x%2").arg(widget->width()).arg(widget->height()));
-        }
-    }
-    
     void handleLoadLanguage(const ToolIpc::Message& msg) {
-        QString lang = msg.payload["language"].toString();
-        m_tool->loadLanguage(lang);
+        const QString lang = msg.payload["language"].toString();
+
+        if (m_workerMode) {
+            if (!m_workerHandle || !m_workerHandleAction) {
+                return;
+            }
+
+            const QByteArray actionTypeUtf8 = QByteArrayLiteral("load_language");
+            QJsonObject argumentsObject;
+            argumentsObject[QStringLiteral("language")] = lang;
+            argumentsObject[QStringLiteral("gameLanguage")] =
+                msg.payload.value(QStringLiteral("gameLanguage")).toString(ConfigManager::instance().getGameLanguage());
+            argumentsObject[QStringLiteral("gameLanguageNames")] =
+                msg.payload.value(QStringLiteral("gameLanguageNames")).toObject(
+                    ConfigManager::instance().toJson().value(QStringLiteral("gameLanguageNames")).toObject());
+            argumentsObject[QStringLiteral("localizedStrings")] = stringMapToJsonObject(
+                LocalizationManager::instance().loadToolStrings(QFileInfo(m_toolPath).absolutePath(), lang)
+            );
+            const QByteArray argumentsUtf8 =
+                QJsonDocument(argumentsObject).toJson(QJsonDocument::Compact);
+
+            ToolWorkerResult result = TOOL_WORKER_ERROR_UNKNOWN;
+            const char* stateJson = m_workerHandleAction(
+                m_workerHandle,
+                actionTypeUtf8.constData(),
+                "",
+                argumentsUtf8.constData(),
+                &result
+            );
+            if (stateJson && m_workerFreeString) {
+                m_workerFreeString(stateJson);
+            }
+            if (result != TOOL_WORKER_SUCCESS && m_workerGetLastError) {
+                Logger::instance().logWarning(
+                    "ToolHost",
+                    QStringLiteral("Worker language update failed: %1").arg(QString::fromUtf8(m_workerGetLastError(m_workerHandle)))
+                );
+            }
+            return;
+        }
     }
     
     void handleApplyTheme(const ToolIpc::Message& msg) {
         Q_UNUSED(msg);
-        m_tool->applyTheme();
     }
     
     void handleGetToolInfo(const ToolIpc::Message& msg) {
-        ToolIpc::ToolInfo info;
-        info.id = m_tool->id();
-        info.name = m_tool->name();
-        info.description = m_tool->description();
-        info.version = m_tool->version();
-        info.compatibleVersion = m_tool->compatibleVersion();
-        info.author = m_tool->author();
+        ToolIpc::ToolInfo info = m_toolInfo;
         
         QJsonObject payload;
         payload["toolInfo"] = info.toJson();
         
         sendMessage(ToolIpc::MessageType::ToolInfoResponse, payload, msg.requestId);
     }
-    
-    bool requestAuthorizedPluginBinaryPath(const QString& pluginName, QString* outPath, QString* errorMessage) {
-        if (pluginName.trimmed().isEmpty()) {
-            if (errorMessage) {
-                *errorMessage = "Plugin name is empty.";
+
+    void handleUiActionMessage(const ToolIpc::Message& msg) {
+        QJsonObject payload;
+
+        if (m_workerMode) {
+            if (!m_workerHandle || !m_workerHandleAction) {
+                payload["success"] = false;
+                payload["error"] = QStringLiteral("Worker handle is not available.");
+                sendMessage(ToolIpc::MessageType::UiActionResponse, payload, msg.requestId);
+                return;
             }
-            return false;
+
+            const QByteArray actionTypeUtf8 = msg.payload.value("actionType").toString().toUtf8();
+            const QByteArray targetIdUtf8 = msg.payload.value("targetId").toString().toUtf8();
+            const QByteArray argumentsUtf8 =
+                QJsonDocument(msg.payload.value("arguments").toObject()).toJson(QJsonDocument::Compact);
+            const quint32 requestId = msg.requestId;
+
+            QTimer::singleShot(0, this, [this, requestId, actionTypeUtf8, targetIdUtf8, argumentsUtf8]() {
+                sendWorkerUiActionResponse(requestId, actionTypeUtf8, targetIdUtf8, argumentsUtf8);
+            });
+            return;
         }
 
-        if (m_socket->state() != QLocalSocket::ConnectedState) {
-            if (errorMessage) {
-                *errorMessage = "IPC socket is not connected.";
+        payload["success"] = false;
+        payload["error"] = QStringLiteral("Worker handle is not available.");
+        sendMessage(ToolIpc::MessageType::UiActionResponse, payload, msg.requestId);
+    }
+
+    void sendWorkerUiActionResponse(quint32 requestId,
+                                    const QByteArray& actionTypeUtf8,
+                                    const QByteArray& targetIdUtf8,
+                                    const QByteArray& argumentsUtf8) {
+        QJsonObject payload;
+        if (!m_workerMode || m_shutdownRequested || !m_workerHandle || !m_workerHandleAction) {
+            payload["success"] = false;
+            payload["error"] = QStringLiteral("Worker handle is not available.");
+            sendMessage(ToolIpc::MessageType::UiActionResponse, payload, requestId);
+            return;
+        }
+
+        if (!m_socket || m_socket->state() != QLocalSocket::ConnectedState) {
+            return;
+        }
+
+        ToolWorkerResult result = TOOL_WORKER_ERROR_UNKNOWN;
+        const char* stateJson = m_workerHandleAction(
+            m_workerHandle,
+            actionTypeUtf8.constData(),
+            targetIdUtf8.constData(),
+            argumentsUtf8.constData(),
+            &result
+        );
+
+        payload["success"] = (result == TOOL_WORKER_SUCCESS);
+        payload["state"] = jsonObjectFromUtf8(stateJson);
+        if (result != TOOL_WORKER_SUCCESS) {
+            payload["error"] = m_workerGetLastError
+                ? QString::fromUtf8(m_workerGetLastError(m_workerHandle))
+                : QStringLiteral("Worker action failed.");
+        }
+        if (stateJson && m_workerFreeString) {
+            m_workerFreeString(stateJson);
+        }
+        sendMessage(ToolIpc::MessageType::UiActionResponse, payload, requestId);
+    }
+
+    void handleStateQueryMessage(const ToolIpc::Message& msg) {
+        QJsonObject payload;
+
+        if (m_workerMode) {
+            if (!m_workerHandle || !m_workerGetCurrentState) {
+                payload["success"] = false;
+                payload["error"] = QStringLiteral("Worker state query is unavailable.");
+                sendMessage(ToolIpc::MessageType::StateQueryResponse, payload, msg.requestId);
+                return;
             }
-            return false;
+
+            const bool initialQuery = msg.payload.value("initial").toBool(false);
+            if (initialQuery && !m_dataReady) {
+                m_pendingInitialStateQueries.append(msg);
+                return;
+            }
+
+            ToolWorkerResult result = TOOL_WORKER_ERROR_UNKNOWN;
+            const char* stateJson = nullptr;
+            if (initialQuery && m_workerGetInitialState) {
+                stateJson = m_workerGetInitialState(m_workerHandle, &result);
+            } else {
+                stateJson = m_workerGetCurrentState(m_workerHandle, &result);
+            }
+            payload["success"] = (result == TOOL_WORKER_SUCCESS);
+            payload["state"] = jsonObjectFromUtf8(stateJson);
+            if (result != TOOL_WORKER_SUCCESS) {
+                payload["error"] = m_workerGetLastError
+                    ? QString::fromUtf8(m_workerGetLastError(m_workerHandle))
+                    : QStringLiteral("Worker state query failed.");
+            }
+            if (stateJson && m_workerFreeString) {
+                m_workerFreeString(stateJson);
+            }
+            sendMessage(ToolIpc::MessageType::StateQueryResponse, payload, msg.requestId);
+            return;
+        }
+
+        payload["success"] = false;
+        payload["error"] = QStringLiteral("Worker state query is unavailable.");
+        sendMessage(ToolIpc::MessageType::StateQueryResponse, payload, msg.requestId);
+    }
+
+    void processPendingInitialStateQueries() {
+        if (!m_dataReady || m_shutdownRequested || m_pendingInitialStateQueries.isEmpty()) {
+            return;
+        }
+
+        const QList<ToolIpc::Message> pendingQueries = m_pendingInitialStateQueries;
+        m_pendingInitialStateQueries.clear();
+        for (const ToolIpc::Message& pendingQuery : pendingQueries) {
+            handleStateQueryMessage(pendingQuery);
+        }
+    }
+
+    ToolRuntimeContext::MatchingTextFilesResult requestMatchingTextFiles(ToolRuntimeContext::FileRoot root,
+                                                                         const QString& relativePath,
+                                                                         const QString& regexPattern,
+                                                                         bool recursive) {
+        ToolRuntimeContext::MatchingTextFilesResult result;
+        if (m_socket->state() != QLocalSocket::ConnectedState) {
+            result.errorMessage = "IPC socket is not connected.";
+            return result;
         }
 
         const quint32 requestId = ++m_requestId;
         QJsonObject payload;
-        payload["pluginName"] = pluginName.trimmed();
+        payload["root"] = ToolRuntimeContext::fileRootToString(root);
+        payload["relativePath"] = relativePath;
+        payload["regexPattern"] = regexPattern;
+        payload["recursive"] = recursive;
 
-        m_pluginPathRequestCompleted = false;
-        m_pluginPathRequestSuccess = false;
-        m_pluginPathRequestPath.clear();
-        m_pluginPathRequestError.clear();
-        m_pluginPathRequestRequestId = requestId;
+        m_matchingTextFilesRequestCompleted = false;
+        m_matchingTextFilesRequestResult = ToolRuntimeContext::MatchingTextFilesResult{};
+        m_matchingTextFilesRequestId = requestId;
 
-        sendMessage(ToolIpc::MessageType::GetPluginBinaryPath, payload, requestId);
+        sendMessage(ToolIpc::MessageType::ReadMatchingTextFiles, payload, requestId);
 
         QElapsedTimer timer;
         timer.start();
-        while (!m_pluginPathRequestCompleted && timer.elapsed() < 5000) {
+        while (!m_matchingTextFilesRequestCompleted && timer.elapsed() < 5000) {
+            processAvailableMessages();
             QCoreApplication::processEvents(QEventLoop::AllEvents, 20);
+            processAvailableMessages();
             QThread::msleep(10);
         }
 
-        if (!m_pluginPathRequestCompleted) {
-            if (errorMessage) {
-                *errorMessage = QString("Timed out while requesting plugin %1.").arg(pluginName);
-            }
-            m_pluginPathRequestRequestId = 0;
-            return false;
+        if (!m_matchingTextFilesRequestCompleted) {
+            m_matchingTextFilesRequestId = 0;
+            result.errorMessage = QString("Timed out while reading matching text files: %1").arg(relativePath);
+            return result;
         }
 
-        m_pluginPathRequestRequestId = 0;
+        m_matchingTextFilesRequestId = 0;
+        return m_matchingTextFilesRequestResult;
+    }
 
-        if (!m_pluginPathRequestSuccess) {
-            if (errorMessage) {
-                *errorMessage = m_pluginPathRequestError;
-            }
-            return false;
+    ToolRuntimeContext::PluginInvokeResponse requestInvokePlugin(const ToolRuntimeContext::PluginInvokeRequest& request) {
+        ToolRuntimeContext::PluginInvokeResponse result;
+        if (m_socket->state() != QLocalSocket::ConnectedState) {
+            result.errorMessage = "IPC socket is not connected.";
+            return result;
         }
 
-        if (outPath) {
-            *outPath = m_pluginPathRequestPath;
+        const quint32 requestId = ++m_requestId;
+        QJsonObject payload;
+        payload["pluginName"] = request.pluginName;
+        payload["operation"] = request.operation;
+        payload["contentType"] = static_cast<int>(request.contentType);
+        payload["flags"] = static_cast<int>(request.flags);
+        payload["payloadBase64"] = QString::fromLatin1(request.payload.toBase64());
+
+        m_pluginInvokeRequestCompleted = false;
+        m_pluginInvokeRequestResult = ToolRuntimeContext::PluginInvokeResponse{};
+        m_pluginInvokeRequestId = requestId;
+
+        sendMessage(ToolIpc::MessageType::InvokePlugin, payload, requestId);
+
+        QElapsedTimer timer;
+        timer.start();
+        while (!m_pluginInvokeRequestCompleted && timer.elapsed() < 30000) {
+            processAvailableMessages();
+            QCoreApplication::processEvents(QEventLoop::AllEvents, 20);
+            processAvailableMessages();
+            QThread::msleep(10);
         }
-        return true;
+
+        if (!m_pluginInvokeRequestCompleted) {
+            m_pluginInvokeRequestId = 0;
+            result.errorMessage = QStringLiteral("Timed out while invoking plugin operation: %1").arg(request.operation);
+            return result;
+        }
+
+        m_pluginInvokeRequestId = 0;
+        return m_pluginInvokeRequestResult;
     }
 
     ToolRuntimeContext::FileReadResult requestBinaryFile(ToolRuntimeContext::FileRoot root, const QString& relativePath) {
@@ -696,7 +804,9 @@ private:
         QElapsedTimer timer;
         timer.start();
         while (!m_binaryReadRequestCompleted && timer.elapsed() < 5000) {
+            processAvailableMessages();
             QCoreApplication::processEvents(QEventLoop::AllEvents, 20);
+            processAvailableMessages();
             QThread::msleep(10);
         }
 
@@ -731,7 +841,9 @@ private:
         QElapsedTimer timer;
         timer.start();
         while (!m_textReadRequestCompleted && timer.elapsed() < 5000) {
+            processAvailableMessages();
             QCoreApplication::processEvents(QEventLoop::AllEvents, 20);
+            processAvailableMessages();
             QThread::msleep(10);
         }
 
@@ -765,7 +877,9 @@ private:
         QElapsedTimer timer;
         timer.start();
         while (!m_effectiveBinaryReadRequestCompleted && timer.elapsed() < 5000) {
+            processAvailableMessages();
             QCoreApplication::processEvents(QEventLoop::AllEvents, 20);
+            processAvailableMessages();
             QThread::msleep(10);
         }
 
@@ -799,7 +913,9 @@ private:
         QElapsedTimer timer;
         timer.start();
         while (!m_effectiveTextReadRequestCompleted && timer.elapsed() < 5000) {
+            processAvailableMessages();
             QCoreApplication::processEvents(QEventLoop::AllEvents, 20);
+            processAvailableMessages();
             QThread::msleep(10);
         }
 
@@ -811,6 +927,48 @@ private:
 
         m_effectiveTextReadRequestId = 0;
         return m_effectiveTextReadRequestResult;
+    }
+
+    ToolRuntimeContext::MatchingTextFilesResult requestEffectiveTextFiles(const QString& relativeRoot,
+                                                                          const QString& suffixFilter) {
+        ToolRuntimeContext::MatchingTextFilesResult result;
+        if (m_socket->state() != QLocalSocket::ConnectedState) {
+            result.errorMessage = "IPC socket is not connected.";
+            return result;
+        }
+
+        const quint32 requestId = ++m_requestId;
+        QJsonObject payload;
+        if (!relativeRoot.trimmed().isEmpty()) {
+            payload.insert(QStringLiteral("relativeRoot"), relativeRoot);
+        }
+        if (!suffixFilter.trimmed().isEmpty()) {
+            payload.insert(QStringLiteral("suffixFilter"), suffixFilter);
+        }
+
+        m_effectiveTextFilesRequestCompleted = false;
+        m_effectiveTextFilesRequestResult = ToolRuntimeContext::MatchingTextFilesResult{};
+        m_effectiveTextFilesRequestId = requestId;
+
+        sendMessage(ToolIpc::MessageType::ReadEffectiveTextFiles, payload, requestId);
+
+        QElapsedTimer timer;
+        timer.start();
+        while (!m_effectiveTextFilesRequestCompleted && timer.elapsed() < 10000) {
+            processAvailableMessages();
+            QCoreApplication::processEvents(QEventLoop::AllEvents, 20);
+            processAvailableMessages();
+            QThread::msleep(10);
+        }
+
+        if (!m_effectiveTextFilesRequestCompleted) {
+            m_effectiveTextFilesRequestId = 0;
+            result.errorMessage = QStringLiteral("Timed out while reading effective text files.");
+            return result;
+        }
+
+        m_effectiveTextFilesRequestId = 0;
+        return m_effectiveTextFilesRequestResult;
     }
 
     ToolRuntimeContext::FileWriteResult requestWriteBinaryFile(ToolRuntimeContext::FileRoot root, const QString& relativePath, const QByteArray& content) {
@@ -835,7 +993,9 @@ private:
         QElapsedTimer timer;
         timer.start();
         while (!m_writeRequestCompleted && timer.elapsed() < 5000) {
+            processAvailableMessages();
             QCoreApplication::processEvents(QEventLoop::AllEvents, 20);
+            processAvailableMessages();
             QThread::msleep(10);
         }
 
@@ -871,7 +1031,9 @@ private:
         QElapsedTimer timer;
         timer.start();
         while (!m_writeRequestCompleted && timer.elapsed() < 5000) {
+            processAvailableMessages();
             QCoreApplication::processEvents(QEventLoop::AllEvents, 20);
+            processAvailableMessages();
             QThread::msleep(10);
         }
 
@@ -906,7 +1068,9 @@ private:
         QElapsedTimer timer;
         timer.start();
         while (!m_writeRequestCompleted && timer.elapsed() < 5000) {
+            processAvailableMessages();
             QCoreApplication::processEvents(QEventLoop::AllEvents, 20);
+            processAvailableMessages();
             QThread::msleep(10);
         }
 
@@ -941,7 +1105,9 @@ private:
         QElapsedTimer timer;
         timer.start();
         while (!m_writeRequestCompleted && timer.elapsed() < 5000) {
+            processAvailableMessages();
             QCoreApplication::processEvents(QEventLoop::AllEvents, 20);
+            processAvailableMessages();
             QThread::msleep(10);
         }
 
@@ -977,7 +1143,9 @@ private:
         QElapsedTimer timer;
         timer.start();
         while (!m_directoryListRequestCompleted && timer.elapsed() < 5000) {
+            processAvailableMessages();
             QCoreApplication::processEvents(QEventLoop::AllEvents, 20);
+            processAvailableMessages();
             QThread::msleep(10);
         }
 
@@ -989,6 +1157,48 @@ private:
 
         m_directoryListRequestId = 0;
         return m_directoryListRequestResult;
+    }
+
+    ToolRuntimeContext::EffectiveFileListResult requestListEffectiveFiles(const QString& relativeRoot = QString(),
+                                                                          const QString& suffixFilter = QString()) {
+        ToolRuntimeContext::EffectiveFileListResult result;
+        if (m_socket->state() != QLocalSocket::ConnectedState) {
+            result.errorMessage = "IPC socket is not connected.";
+            return result;
+        }
+
+        const quint32 requestId = ++m_requestId;
+        QJsonObject payload;
+        if (!relativeRoot.trimmed().isEmpty()) {
+            payload.insert(QStringLiteral("relativeRoot"), relativeRoot);
+        }
+        if (!suffixFilter.trimmed().isEmpty()) {
+            payload.insert(QStringLiteral("suffixFilter"), suffixFilter);
+        }
+
+        m_effectiveFileListRequestCompleted = false;
+        m_effectiveFileListRequestResult = ToolRuntimeContext::EffectiveFileListResult{};
+        m_effectiveFileListRequestId = requestId;
+
+        sendMessage(ToolIpc::MessageType::ListEffectiveFiles, payload, requestId);
+
+        QElapsedTimer timer;
+        timer.start();
+        while (!m_effectiveFileListRequestCompleted && timer.elapsed() < 5000) {
+            processAvailableMessages();
+            QCoreApplication::processEvents(QEventLoop::AllEvents, 20);
+            processAvailableMessages();
+            QThread::msleep(10);
+        }
+
+        if (!m_effectiveFileListRequestCompleted) {
+            m_effectiveFileListRequestId = 0;
+            result.errorMessage = QStringLiteral("Timed out while listing effective files.");
+            return result;
+        }
+
+        m_effectiveFileListRequestId = 0;
+        return m_effectiveFileListRequestResult;
     }
 
     void handleDataResponse(const ToolIpc::Message& msg) {
@@ -1005,12 +1215,36 @@ private:
             m_fileIndexReceived = true;
             break;
 
-        case ToolIpc::MessageType::PluginBinaryPathResponse:
-            if (msg.requestId == m_pluginPathRequestRequestId) {
-                m_pluginPathRequestCompleted = true;
-                m_pluginPathRequestSuccess = msg.payload.value("success").toBool();
-                m_pluginPathRequestPath = msg.payload.value("libraryPath").toString();
-                m_pluginPathRequestError = msg.payload.value("error").toString();
+        case ToolIpc::MessageType::InvokePluginResponse:
+            if (msg.requestId == m_pluginInvokeRequestId) {
+                m_pluginInvokeRequestCompleted = true;
+                m_pluginInvokeRequestResult.success = msg.payload.value("success").toBool();
+                m_pluginInvokeRequestResult.status = static_cast<quint32>(msg.payload.value("status").toInt());
+                m_pluginInvokeRequestResult.contentType =
+                    static_cast<ToolRuntimeContext::PluginPayloadContentType>(msg.payload.value("contentType").toInt());
+                m_pluginInvokeRequestResult.flags = static_cast<quint32>(msg.payload.value("flags").toInt());
+                m_pluginInvokeRequestResult.payload =
+                    QByteArray::fromBase64(msg.payload.value("payloadBase64").toString().toLatin1());
+                m_pluginInvokeRequestResult.errorMessage = msg.payload.value("error").toString();
+            }
+            break;
+
+        case ToolIpc::MessageType::ReadMatchingTextFilesResponse:
+            if (msg.requestId == m_matchingTextFilesRequestId) {
+                m_matchingTextFilesRequestCompleted = true;
+                m_matchingTextFilesRequestResult.success = msg.payload.value("success").toBool();
+                m_matchingTextFilesRequestResult.errorMessage = msg.payload.value("error").toString();
+                m_matchingTextFilesRequestResult.entries.clear();
+
+                const QJsonArray entries = msg.payload.value("entries").toArray();
+                for (const QJsonValue& value : entries) {
+                    const QJsonObject object = value.toObject();
+                    ToolRuntimeContext::TextFileMatchEntry entry;
+                    entry.relativePath = object.value("relativePath").toString();
+                    entry.name = object.value("name").toString();
+                    entry.content = object.value("content").toString();
+                    m_matchingTextFilesRequestResult.entries.append(entry);
+                }
             }
             break;
 
@@ -1052,6 +1286,25 @@ private:
             }
             break;
 
+        case ToolIpc::MessageType::ReadEffectiveTextFilesResponse:
+            if (msg.requestId == m_effectiveTextFilesRequestId) {
+                m_effectiveTextFilesRequestCompleted = true;
+                m_effectiveTextFilesRequestResult.success = msg.payload.value("success").toBool();
+                m_effectiveTextFilesRequestResult.errorMessage = msg.payload.value("error").toString();
+                m_effectiveTextFilesRequestResult.entries.clear();
+
+                const QJsonArray entries = msg.payload.value("entries").toArray();
+                for (const QJsonValue& value : entries) {
+                    const QJsonObject object = value.toObject();
+                    ToolRuntimeContext::TextFileMatchEntry entry;
+                    entry.relativePath = object.value("relativePath").toString();
+                    entry.name = object.value("name").toString();
+                    entry.content = object.value("content").toString();
+                    m_effectiveTextFilesRequestResult.entries.append(entry);
+                }
+            }
+            break;
+
         case ToolIpc::MessageType::WriteBinaryFileResponse:
         case ToolIpc::MessageType::WriteTextFileResponse:
         case ToolIpc::MessageType::RemovePathResponse:
@@ -1087,15 +1340,41 @@ private:
             }
             break;
 
+        case ToolIpc::MessageType::ListEffectiveFilesResponse:
+            if (msg.requestId == m_effectiveFileListRequestId) {
+                m_effectiveFileListRequestCompleted = true;
+                m_effectiveFileListRequestResult.success = msg.payload.value("success").toBool();
+                m_effectiveFileListRequestResult.errorMessage = msg.payload.value("error").toString();
+                m_effectiveFileListRequestResult.entries.clear();
+
+                const QJsonArray entries = msg.payload.value("entries").toArray();
+                for (const QJsonValue& value : entries) {
+                    const QJsonObject object = value.toObject();
+                    ToolRuntimeContext::EffectiveFileEntry entry;
+                    entry.logicalPath = object.value("logicalPath").toString();
+                    entry.source = ToolRuntimeContext::effectiveFileSourceFromString(object.value("source").toString());
+                    entry.lastModifiedMs = object.value("lastModifiedMs").toString().toLongLong();
+                    m_effectiveFileListRequestResult.entries.append(entry);
+                }
+            }
+            break;
+
         default:
             break;
         }
 
+        const bool becameDataReady = !m_dataReady && m_configReceived && m_fileIndexReceived;
         if (m_configReceived && m_fileIndexReceived) {
             m_dataReady = true;
             if (m_dataWaitLoop) {
                 m_dataWaitLoop->quit();
             }
+        }
+
+        if (becameDataReady) {
+            QTimer::singleShot(0, this, [this]() {
+                processPendingInitialStateQueries();
+            });
         }
     }
     
@@ -1103,31 +1382,16 @@ private:
         qDebug() << "Handling shutdown - hiding widgets first";
         m_shutdownRequested = true;
         
-        if (m_mainWidget) {
-#ifdef Q_OS_WIN
-            HWND hwnd = reinterpret_cast<HWND>(m_mainWidget->winId());
-            if (IsWindow(hwnd)) {
-                ShowWindow(hwnd, SW_HIDE);
-            }
-#endif
-            m_mainWidget->hide();
-            delete m_mainWidget;
-            m_mainWidget = nullptr;
-        }
-        
-        if (m_sidebarWidget) {
-#ifdef Q_OS_WIN
-            HWND hwnd = reinterpret_cast<HWND>(m_sidebarWidget->winId());
-            if (IsWindow(hwnd)) {
-                ShowWindow(hwnd, SW_HIDE);
-            }
-#endif
-            m_sidebarWidget->hide();
-            delete m_sidebarWidget;
-            m_sidebarWidget = nullptr;
-        }
         
         m_heartbeatTimer->stop();
+
+        if (m_workerMode && m_workerDestroy && m_workerHandle) {
+            m_workerDestroy(m_workerHandle);
+            m_workerHandle = nullptr;
+        }
+        if (m_workerMode && m_workerLibrary.isLoaded()) {
+            m_workerLibrary.unload();
+        }
         
         if (m_socket->state() == QLocalSocket::ConnectedState) {
             m_socket->disconnectFromServer();
@@ -1138,13 +1402,15 @@ private:
     
     void requestInitialDataAsync() {
         m_configReceived = false;
-        m_fileIndexReceived = false;
+        m_fileIndexReceived = m_workerMode;
         m_dataReady = false;
         
         sendMessage(ToolIpc::MessageType::GetConfig);
-        sendMessage(ToolIpc::MessageType::GetFileIndex);
+        if (!m_workerMode) {
+            sendMessage(ToolIpc::MessageType::GetFileIndex);
+        }
         
-        qDebug() << "Requested initial data from main process (async)";
+        qDebug() << "Requested initial data from main process (async), workerMode=" << m_workerMode;
     }
     
     void sendMessage(ToolIpc::MessageType type, const QJsonObject& payload = QJsonObject(), quint32 requestId = 0) {
@@ -1159,11 +1425,22 @@ private:
     QLocalSocket* m_socket;
     QTimer* m_heartbeatTimer;
     QByteArray m_buffer;
+    ToolIpc::ToolInfo m_toolInfo;
     
-    ToolInterface* m_tool;
-    QWidget* m_mainWidget;
-    QWidget* m_sidebarWidget;
-    quint32 m_requestId;
+    quint32 m_requestId = 0;
+
+    bool m_workerMode = false;
+    QLibrary m_workerLibrary;
+    ToolWorkerHandle m_workerHandle = nullptr;
+    WorkerCreateFn m_workerCreate = nullptr;
+    WorkerDestroyFn m_workerDestroy = nullptr;
+    WorkerInitializeFn m_workerInitialize = nullptr;
+    WorkerHandleActionFn m_workerHandleAction = nullptr;
+    WorkerGetStateFn m_workerGetCurrentState = nullptr;
+    WorkerGetStateFn m_workerGetInitialState = nullptr;
+    WorkerGetLastErrorFn m_workerGetLastError = nullptr;
+    WorkerFreeStringFn m_workerFreeString = nullptr;
+    WorkerGetVersionFn m_workerGetVersion = nullptr;
     
     bool m_configReceived = false;
     bool m_fileIndexReceived = false;
@@ -1172,11 +1449,13 @@ private:
     bool m_connectedOnce = false;
     bool m_retryScheduled = false;
     bool m_shutdownRequested = false;
-    bool m_pluginPathRequestCompleted = false;
-    bool m_pluginPathRequestSuccess = false;
-    quint32 m_pluginPathRequestRequestId = 0;
-    QString m_pluginPathRequestPath;
-    QString m_pluginPathRequestError;
+    bool m_pluginInvokeRequestCompleted = false;
+    quint32 m_pluginInvokeRequestId = 0;
+    ToolRuntimeContext::PluginInvokeResponse m_pluginInvokeRequestResult;
+
+    bool m_matchingTextFilesRequestCompleted = false;
+    quint32 m_matchingTextFilesRequestId = 0;
+    ToolRuntimeContext::MatchingTextFilesResult m_matchingTextFilesRequestResult;
 
     bool m_binaryReadRequestCompleted = false;
     quint32 m_binaryReadRequestId = 0;
@@ -1194,6 +1473,10 @@ private:
     quint32 m_effectiveTextReadRequestId = 0;
     ToolRuntimeContext::TextReadResult m_effectiveTextReadRequestResult;
 
+    bool m_effectiveTextFilesRequestCompleted = false;
+    quint32 m_effectiveTextFilesRequestId = 0;
+    ToolRuntimeContext::MatchingTextFilesResult m_effectiveTextFilesRequestResult;
+
     bool m_writeRequestCompleted = false;
     quint32 m_writeRequestId = 0;
     ToolRuntimeContext::FileWriteResult m_writeRequestResult;
@@ -1202,7 +1485,12 @@ private:
     quint32 m_directoryListRequestId = 0;
     ToolRuntimeContext::DirectoryListResult m_directoryListRequestResult;
 
+    bool m_effectiveFileListRequestCompleted = false;
+    quint32 m_effectiveFileListRequestId = 0;
+    ToolRuntimeContext::EffectiveFileListResult m_effectiveFileListRequestResult;
+
     QEventLoop* m_dataWaitLoop = nullptr;
+    QList<ToolIpc::Message> m_pendingInitialStateQueries;
 };
 
 int runToolHostMode(const QString& serverName, const QString& toolPath, const QString& toolName, const QString& logFilePath) {

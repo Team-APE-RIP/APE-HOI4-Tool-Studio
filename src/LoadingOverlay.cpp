@@ -8,6 +8,7 @@
 //-------------------------------------------------------------------------------------
 #include "LoadingOverlay.h"
 #include "ConfigManager.h"
+#include "OverlayAcrylicMaterial.h"
 #include <QPainter>
 #include <QPainterPath>
 #include <QApplication>
@@ -19,10 +20,11 @@ LoadingOverlay::LoadingOverlay(QWidget *parent)
 {
     setAttribute(Qt::WA_TransparentForMouseEvents, false);
     setAttribute(Qt::WA_TranslucentBackground);
+    OverlayAcrylicMaterial::installLiveRefresh(this);
     // Don't set FramelessWindowHint - it makes this a separate window instead of a child widget
     
     // Container for content
-    m_container = new QWidget(this);
+    m_container = new OverlayAcrylicPanel(this);
     m_container->setObjectName("LoadingContainer");
     m_container->setFixedSize(350, 400);
     
@@ -64,19 +66,16 @@ LoadingOverlay::LoadingOverlay(QWidget *parent)
 void LoadingOverlay::updateTheme() {
     bool isDark = ConfigManager::instance().isCurrentThemeDark();
     
-    QString containerBg = isDark ? "#2C2C2E" : "#FFFFFF";
     QString textColor = isDark ? "#FFFFFF" : "#1D1D1F";
-    QString borderColor = isDark ? "#3A3A3C" : "#D2D2D7";
-    QString progressBg = isDark ? "#3A3A3C" : "#E5E5EA";
-    QString progressChunk = "#007AFF";
+    QString progressBg = isDark ? "rgba(58, 58, 60, 0.58)" : "rgba(229, 229, 234, 0.68)";
+    QString progressChunk = OverlayAcrylicMaterial::accentGlassBrush(isDark);
     
     m_container->setStyleSheet(QString(
         "QWidget#LoadingContainer {"
-        "  background-color: %1;"
-        "  border: 1px solid %2;"
-        "  border-radius: 12px;"
+        "  background-color: transparent;"
+        "  border: none;"
         "}"
-    ).arg(containerBg, borderColor));
+    ));
     
     m_messageLabel->setStyleSheet(QString(
         "QLabel#LoadingMessage {"
@@ -124,7 +123,12 @@ void LoadingOverlay::showOverlay() {
 void LoadingOverlay::hideOverlay() {
     qDebug() << "LoadingOverlay::hideOverlay() called, isVisible:" << isVisible();
     hide();
-    qDebug() << "LoadingOverlay::hideOverlay() after hide(), isVisible:" << isVisible();
+    // CRITICAL FIX: Lower the overlay to prevent it from blocking tool UI
+    // Even when hidden, the widget's z-order can still affect event routing
+    if (parentWidget()) {
+        lower();
+    }
+    qDebug() << "LoadingOverlay::hideOverlay() after hide() and lower(), isVisible:" << isVisible();
 }
 
 void LoadingOverlay::paintEvent(QPaintEvent *event) {
@@ -133,14 +137,13 @@ void LoadingOverlay::paintEvent(QPaintEvent *event) {
     QPainter painter(this);
     painter.setRenderHint(QPainter::Antialiasing);
     
-    // Semi-transparent background with rounded corners on all sides to match main window
-    QPainterPath path;
-    QRectF r = rect();
-    qreal radius = 9;
-    
-    path.addRoundedRect(r, radius, radius);
-    
-    painter.fillPath(path, QColor(0, 0, 0, 120));
+    OverlayAcrylicMaterial::paintOverlayBackdrop(
+        painter,
+        this,
+        QRectF(rect()),
+        9.0,
+        ConfigManager::instance().isCurrentThemeDark(),
+        116);
 }
 
 bool LoadingOverlay::eventFilter(QObject *obj, QEvent *event) {

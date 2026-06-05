@@ -17,6 +17,7 @@
 #include <QFileInfo>
 #include <QFuture>
 #include <QJsonDocument>
+#include <QMetaObject>
 #include <QProcess>
 #include <QSaveFile>
 #include <QStandardPaths>
@@ -26,7 +27,7 @@
 
 namespace {
 constexpr int kExpectedDlcCacheFileCount = 368;
-constexpr int kPersistentCacheVersion = 2;
+constexpr int kPersistentCacheVersion = 3;
 
 QString sourceToString(FileSource source) {
     switch (source) {
@@ -64,6 +65,42 @@ FileManager::CompactFileRecord compactRecordFromJson(const QJsonObject& obj) {
 
 qint64 computeFileSignatureMs(const QFileInfo& info) {
     return info.lastModified().toMSecsSinceEpoch();
+}
+
+bool isExistingRegularFile(const QString& path) {
+    const QFileInfo info(path);
+    return info.exists() && info.isFile();
+}
+
+QMap<QString, FileDetails> filterExistingEffectiveFiles(const QMap<QString, FileDetails>& files,
+                                                        bool* removedStaleEntry = nullptr) {
+    QMap<QString, FileDetails> filtered;
+    bool removed = false;
+
+    for (auto it = files.constBegin(); it != files.constEnd(); ++it) {
+        const QString absolutePath = QDir::cleanPath(it.value().absPath);
+        if (absolutePath.trimmed().isEmpty() || !isExistingRegularFile(absolutePath)) {
+            removed = true;
+            continue;
+        }
+        filtered.insert(it.key(), it.value());
+    }
+
+    if (removedStaleEntry) {
+        *removedStaleEntry = removed;
+    }
+    return filtered;
+}
+
+QString normalizeEffectiveLogicalPath(const QString& path) {
+    QString normalized = QDir::cleanPath(path.trimmed()).replace('\\', '/');
+    if (normalized == ".") {
+        normalized.clear();
+    }
+    while (normalized.startsWith('/')) {
+        normalized.remove(0, 1);
+    }
+    return normalized;
 }
 
 void sanitizeScanResult(FileManager::ScanResult& result) {
@@ -164,6 +201,12 @@ QJsonObject FileManager::PersistentCachePayload::toJson() const {
     }
     obj["fileTimes"] = fileTimesObject;
 
+    QJsonObject directoryTimesObject;
+    for (auto it = scanResult.directoryTimes.begin(); it != scanResult.directoryTimes.end(); ++it) {
+        directoryTimesObject[it.key()] = QString::number(it.value());
+    }
+    obj["directoryTimes"] = directoryTimesObject;
+
     QJsonArray watchedPathsArray;
     for (const QString& watchedPath : scanResult.watchedPaths) {
         watchedPathsArray.append(watchedPath);
@@ -205,6 +248,11 @@ FileManager::PersistentCachePayload FileManager::PersistentCachePayload::fromJso
     const QJsonObject fileTimesObject = obj["fileTimes"].toObject();
     for (auto it = fileTimesObject.begin(); it != fileTimesObject.end(); ++it) {
         payload.scanResult.fileTimes.insert(it.key(), it.value().toString().toLongLong());
+    }
+
+    const QJsonObject directoryTimesObject = obj["directoryTimes"].toObject();
+    for (auto it = directoryTimesObject.begin(); it != directoryTimesObject.end(); ++it) {
+        payload.scanResult.directoryTimes.insert(it.key(), it.value().toString().toLongLong());
     }
 
     const QJsonArray watchedPathsArray = obj["watchedPaths"].toArray();
@@ -413,9 +461,12 @@ FileManager::ScanResult FileManager::doScan(const QString& gamePath,
     if (!result.watchedPaths.contains(context.gamePath)) {
         result.watchedPaths.append(context.gamePath);
     }
+    result.directoryTimes.insert(context.gamePath, getPathLastModifiedMs(context.gamePath));
+
     if (!result.watchedPaths.contains(context.modPath)) {
         result.watchedPaths.append(context.modPath);
     }
+    result.directoryTimes.insert(context.modPath, getPathLastModifiedMs(context.modPath));
 
     sanitizeScanResult(result);
 
@@ -587,6 +638,7 @@ FileManager::ScanResult FileManager::scanDirectoryRecursive(const ScanContext& c
         if (!result.watchedPaths.contains(absoluteDirPath)) {
             result.watchedPaths.append(absoluteDirPath);
         }
+        result.directoryTimes.insert(absoluteDirPath, computeFileSignatureMs(QFileInfo(absoluteDirPath)));
 
         const QFileInfoList entries = dir.entryInfoList(
             QDir::Files | QDir::Dirs | QDir::NoDotAndDotDot,
@@ -850,6 +902,13 @@ bool FileManager::isPersistentCacheValid(const PersistentCachePayload& payload,
 
     if (payload.modDescriptorLastModifiedMs != descriptorLastModifiedMs) return false;
     if (payload.scanResult.files.isEmpty()) return false;
+    if (payload.scanResult.directoryTimes.isEmpty()) return false;
+
+    for (auto it = payload.scanResult.directoryTimes.begin(); it != payload.scanResult.directoryTimes.end(); ++it) {
+        const QFileInfo info(it.key());
+        if (!info.exists() || !info.isDir()) return false;
+        if (computeFileSignatureMs(info) != it.value()) return false;
+    }
 
     return true;
 }
@@ -935,6 +994,10 @@ void FileManager::mergeScanResult(ScanResult& target, ScanResult&& source) {
         target.fileTimes.insert(it.key(), it.value());
     }
 
+    for (auto it = source.directoryTimes.begin(); it != source.directoryTimes.end(); ++it) {
+        target.directoryTimes.insert(it.key(), it.value());
+    }
+
     for (const QString& path : source.replacePaths) {
         target.replacePaths.insert(path);
     }
@@ -962,6 +1025,7 @@ void FileManager::convertScanResultToPublicData(const ScanResult& scanResult,
         FileDetails details;
         details.absPath = it.value().absPath;
         details.source = it.value().source;
+        details.lastModifiedMs = it.value().lastModifiedMs;
         files.insert(it.key(), details);
     }
 
@@ -1009,9 +1073,77 @@ bool FileManager::isIgnoredFile(const QString& absPath, const QString& relPath, 
     return false;
 }
 
+bool FileManager::getEffectiveFile(const QString& relativePath, FileDetails* outDetails) const {
+    if (!outDetails) {
+        return false;
+    }
+
+    const QString normalizedPath = normalizeEffectiveLogicalPath(relativePath);
+    if (normalizedPath.isEmpty()) {
+        return false;
+    }
+
+    FileDetails details;
+    {
+        QMutexLocker locker(&m_mutex);
+        const auto it = m_files.constFind(normalizedPath);
+        if (it == m_files.constEnd()) {
+            return false;
+        }
+        details = it.value();
+    }
+
+    if (details.absPath.trimmed().isEmpty() || !isExistingRegularFile(details.absPath)) {
+        scheduleRefreshForStaleIndex();
+        return false;
+    }
+
+    *outDetails = details;
+    return true;
+}
+
 QMap<QString, FileDetails> FileManager::getEffectiveFiles() const {
     QMutexLocker locker(&m_mutex);
     return m_files;
+}
+
+QMap<QString, FileDetails> FileManager::getEffectiveFiles(const QString& relativeRoot,
+                                                          const QString& suffixFilter) const {
+    QString normalizedRoot = normalizeEffectiveLogicalPath(relativeRoot);
+    if (!normalizedRoot.isEmpty() && !normalizedRoot.endsWith('/')) {
+        normalizedRoot.append('/');
+    }
+
+    const QString normalizedSuffix = suffixFilter.trimmed();
+
+    QMap<QString, FileDetails> snapshot;
+    {
+        QMutexLocker locker(&m_mutex);
+        snapshot = m_files;
+    }
+
+    if (normalizedRoot.isEmpty() && normalizedSuffix.isEmpty()) {
+        return snapshot;
+    }
+
+    QMap<QString, FileDetails> candidates;
+    for (auto it = snapshot.constBegin(); it != snapshot.constEnd(); ++it) {
+        const QString logicalPath = it.key();
+        if (!normalizedRoot.isEmpty() && !logicalPath.startsWith(normalizedRoot, Qt::CaseInsensitive)) {
+            continue;
+        }
+        if (!normalizedSuffix.isEmpty() && !logicalPath.endsWith(normalizedSuffix, Qt::CaseInsensitive)) {
+            continue;
+        }
+        candidates.insert(logicalPath, it.value());
+    }
+
+    bool removedStaleEntry = false;
+    const QMap<QString, FileDetails> filtered = filterExistingEffectiveFiles(candidates, &removedStaleEntry);
+    if (removedStaleEntry) {
+        scheduleRefreshForStaleIndex();
+    }
+    return filtered;
 }
 
 QStringList FileManager::getReplacePaths() const {
@@ -1025,17 +1157,23 @@ int FileManager::getFileCount() const {
 }
 
 QJsonObject FileManager::toJson() const {
-    QMutexLocker locker(&m_mutex);
+    QMap<QString, FileDetails> filesSnapshot;
+    QSet<QString> replacePathsSnapshot;
+    {
+        QMutexLocker locker(&m_mutex);
+        filesSnapshot = m_files;
+        replacePathsSnapshot = m_replacePaths;
+    }
 
     QJsonObject obj;
     QJsonObject filesObj;
-    for (auto it = m_files.begin(); it != m_files.end(); ++it) {
+    for (auto it = filesSnapshot.begin(); it != filesSnapshot.end(); ++it) {
         filesObj[it.key()] = it.value().toJson();
     }
     obj["files"] = filesObj;
 
     QJsonArray replacePathsArr;
-    for (const QString& path : m_replacePaths) {
+    for (const QString& path : replacePathsSnapshot) {
         replacePathsArr.append(path);
     }
     obj["replacePaths"] = replacePathsArr;
@@ -1070,7 +1208,7 @@ void FileManager::setFromJson(const QJsonObject& obj) {
         const FileDetails details = FileDetails::fromJson(it.value().toObject());
         m_files[it.key()] = details;
         if (!details.absPath.isEmpty()) {
-            m_fileTimes[details.absPath] = getPathLastModifiedMs(details.absPath);
+            m_fileTimes[details.absPath] = details.lastModifiedMs;
         }
     }
 
@@ -1080,4 +1218,14 @@ void FileManager::setFromJson(const QJsonObject& obj) {
     }
 
     Logger::instance().logInfo("FileManager", QString("Loaded %1 files from IPC data").arg(m_files.size()));
+}
+
+void FileManager::scheduleRefreshForStaleIndex() const {
+    FileManager* self = const_cast<FileManager*>(this);
+    QMetaObject::invokeMethod(self, [self]() {
+        if (!self->m_isScanning && self->m_debounceTimer) {
+            Logger::instance().logWarning("FileManager", "Detected stale file index entry, scheduling a rescan");
+            self->m_debounceTimer->start();
+        }
+    }, Qt::QueuedConnection);
 }

@@ -42,9 +42,16 @@ public:
         QString errorMessage;
     };
 
+    struct TextFileMatchEntry {
+        QString relativePath;
+        QString name;
+        QString content;
+    };
+
     struct EffectiveFileEntry {
         QString logicalPath;
         EffectiveFileSource source = EffectiveFileSource::Unknown;
+        qint64 lastModifiedMs = 0;
     };
 
     struct EffectiveFileListResult {
@@ -53,11 +60,18 @@ public:
         QString errorMessage;
     };
 
+    struct MatchingTextFilesResult {
+        bool success = false;
+        QList<TextFileMatchEntry> entries;
+        QString errorMessage;
+    };
+
     using BinaryFileReader = std::function<FileReadResult(FileRoot, const QString&)>;
     using TextFileReader = std::function<TextReadResult(FileRoot, const QString&)>;
     using EffectiveBinaryFileReader = std::function<FileReadResult(const QString&)>;
     using EffectiveTextFileReader = std::function<TextReadResult(const QString&)>;
-    using EffectiveFileEnumerator = std::function<EffectiveFileListResult()>;
+    using EffectiveFileEnumerator = std::function<EffectiveFileListResult(const QString&, const QString&)>;
+    using EffectiveTextFilesReader = std::function<MatchingTextFilesResult(const QString&, const QString&)>;
 
     static PluginRuntimeContext& instance();
 
@@ -74,7 +88,12 @@ public:
     TextReadResult readEffectiveTextFile(const QString& relativePath) const;
 
     void setEffectiveFileEnumerator(EffectiveFileEnumerator enumerator);
-    EffectiveFileListResult listEffectiveFiles() const;
+    EffectiveFileListResult listEffectiveFiles(const QString& relativeRoot = QString(),
+                                                const QString& suffixFilter = QString()) const;
+
+    void setEffectiveTextFilesReader(EffectiveTextFilesReader reader);
+    MatchingTextFilesResult readEffectiveTextFiles(const QString& relativeRoot = QString(),
+                                                   const QString& suffixFilter = QString()) const;
 
     static QString fileRootToString(FileRoot root);
     static FileRoot fileRootFromString(const QString& value);
@@ -87,6 +106,7 @@ private:
     EffectiveBinaryFileReader m_effectiveBinaryFileReader;
     EffectiveTextFileReader m_effectiveTextFileReader;
     EffectiveFileEnumerator m_effectiveFileEnumerator;
+    EffectiveTextFilesReader m_effectiveTextFilesReader;
 };
 
 #endif // PLUGINRUNTIMECONTEXT_H

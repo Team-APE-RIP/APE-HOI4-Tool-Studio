@@ -12,7 +12,6 @@
 #include <QObject>
 #include <QList>
 #include <QMap>
-#include <QPluginLoader>
 #include <functional>
 #include "ToolInterface.h"
 
@@ -34,36 +33,31 @@ public:
     bool isToolActive() const;
     void setToolActive(bool active);
     
-    // Process isolation mode
-    bool isProcessIsolationEnabled() const { return m_processIsolationEnabled; }
-    void setProcessIsolationEnabled(bool enabled);
-    
     // Get active tool proxy (for crash handling)
-    ToolProxyInterface* getActiveToolProxy() const { return m_activeToolProxy; }
-    void setActiveToolProxy(ToolProxyInterface* proxy) { m_activeToolProxy = proxy; }
+    ToolProxyInterface* getActiveToolProxy() const;
+    void setActiveToolProxy(ToolProxyInterface* proxy);
 
 signals:
     void toolsLoaded();
     void toolProcessCrashed(const QString& toolId, const QString& error);
-    void questionDialogRequested(const QString& title, const QString& message, 
-                                  std::function<void(bool)> callback);
 
 public:
+    // Register main window dialog handler for tool callbacks.
+    void setQuestionDialogHandler(std::function<void(const QString&, const QString&, std::function<void(bool)>)> handler);
     // Request main window to show a question dialog (for tools to use)
-    void requestQuestionDialog(const QString& title, const QString& message, 
+    void requestQuestionDialog(const QString& title, const QString& message,
                                std::function<void(bool)> callback);
 
 private:
     ToolManager();
     
-    void loadToolsWithIsolation();
-    void loadToolsDirectly();
+    void loadToolProxies();
     
     QList<ToolInterface*> m_tools;
     QMap<QString, ToolInterface*> m_toolMap;
     bool m_isToolActive = false;
-    bool m_processIsolationEnabled = false; // Process isolation disabled - tools run in main process (isolation mode has display issues)
     ToolProxyInterface* m_activeToolProxy = nullptr;
+    std::function<void(const QString&, const QString&, std::function<void(bool)>)> m_questionDialogHandler;
 };
 
 #endif // TOOLMANAGER_H

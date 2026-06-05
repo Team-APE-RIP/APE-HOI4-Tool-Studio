@@ -13,6 +13,7 @@
 #include <QStringList>
 #include <QByteArray>
 #include <QDateTime>
+#include <QList>
 #include <functional>
 
 class ToolRuntimeContext {
@@ -21,6 +22,13 @@ public:
         Game,
         Mod,
         Doc,
+        Unknown
+    };
+
+    enum class EffectiveFileSource {
+        Game,
+        Mod,
+        Dlc,
         Unknown
     };
 
@@ -55,11 +63,62 @@ public:
         QString errorMessage;
     };
 
-    using PluginBinaryPathResolver = std::function<bool(const QString&, QString*, QString*)>;
+    struct TextFileMatchEntry {
+        QString relativePath;
+        QString name;
+        QString content;
+    };
+
+    struct EffectiveFileEntry {
+        QString logicalPath;
+        EffectiveFileSource source = EffectiveFileSource::Unknown;
+        qint64 lastModifiedMs = 0;
+    };
+
+    struct MatchingTextFilesResult {
+        bool success = false;
+        QList<TextFileMatchEntry> entries;
+        QString errorMessage;
+    };
+
+    struct EffectiveFileListResult {
+        bool success = false;
+        QList<EffectiveFileEntry> entries;
+        QString errorMessage;
+    };
+
+    enum class PluginPayloadContentType {
+        None = 0,
+        JsonUtf8 = 1,
+        Binary = 2,
+        BinaryEnvelope = 3
+    };
+
+    struct PluginInvokeRequest {
+        QString pluginName;
+        QString operation;
+        PluginPayloadContentType contentType = PluginPayloadContentType::None;
+        QByteArray payload;
+        quint32 flags = 0;
+    };
+
+    struct PluginInvokeResponse {
+        bool success = false;
+        PluginPayloadContentType contentType = PluginPayloadContentType::None;
+        QByteArray payload;
+        QString errorMessage;
+        quint32 status = 0;
+        quint32 flags = 0;
+    };
+
+    using PluginInvoker = std::function<PluginInvokeResponse(const PluginInvokeRequest&)>;
+    using MatchingTextFileReader = std::function<MatchingTextFilesResult(FileRoot, const QString&, const QString&, bool)>;
     using BinaryFileReader = std::function<FileReadResult(FileRoot, const QString&)>;
     using TextFileReader = std::function<TextReadResult(FileRoot, const QString&)>;
     using EffectiveBinaryFileReader = std::function<FileReadResult(const QString&)>;
     using EffectiveTextFileReader = std::function<TextReadResult(const QString&)>;
+    using EffectiveFileEnumerator = std::function<EffectiveFileListResult(const QString&, const QString&)>;
+    using EffectiveTextFilesReader = std::function<MatchingTextFilesResult(const QString&, const QString&)>;
     using BinaryFileWriter = std::function<FileWriteResult(FileRoot, const QString&, const QByteArray&)>;
     using TextFileWriter = std::function<FileWriteResult(FileRoot, const QString&, const QString&)>;
     using PathRemover = std::function<FileWriteResult(FileRoot, const QString&)>;
@@ -68,8 +127,14 @@ public:
 
     static ToolRuntimeContext& instance();
 
-    void setPluginBinaryPathResolver(PluginBinaryPathResolver resolver);
-    bool requestAuthorizedPluginBinaryPath(const QString& pluginName, QString* outPath, QString* errorMessage = nullptr) const;
+    void setPluginInvoker(PluginInvoker invoker);
+    PluginInvokeResponse invokePlugin(const PluginInvokeRequest& request) const;
+
+    void setMatchingTextFileReader(MatchingTextFileReader reader);
+    MatchingTextFilesResult readMatchingTextFiles(FileRoot root,
+                                                  const QString& relativePath,
+                                                  const QString& regexPattern,
+                                                  bool recursive) const;
 
     void setBinaryFileReader(BinaryFileReader reader);
     FileReadResult readFile(FileRoot root, const QString& relativePath) const;
@@ -82,6 +147,14 @@ public:
 
     void setEffectiveTextFileReader(EffectiveTextFileReader reader);
     TextReadResult readEffectiveTextFile(const QString& relativePath) const;
+
+    void setEffectiveFileEnumerator(EffectiveFileEnumerator enumerator);
+    EffectiveFileListResult listEffectiveFiles(const QString& relativeRoot = QString(),
+                                                const QString& suffixFilter = QString()) const;
+
+    void setEffectiveTextFilesReader(EffectiveTextFilesReader reader);
+    MatchingTextFilesResult readEffectiveTextFiles(const QString& relativeRoot = QString(),
+                                                   const QString& suffixFilter = QString()) const;
 
     void setBinaryFileWriter(BinaryFileWriter writer);
     FileWriteResult writeFile(FileRoot root, const QString& relativePath, const QByteArray& content) const;
@@ -100,15 +173,20 @@ public:
 
     static QString fileRootToString(FileRoot root);
     static FileRoot fileRootFromString(const QString& value);
+    static QString effectiveFileSourceToString(EffectiveFileSource source);
+    static EffectiveFileSource effectiveFileSourceFromString(const QString& value);
 
 private:
     ToolRuntimeContext() = default;
 
-    PluginBinaryPathResolver m_pluginBinaryPathResolver;
+    PluginInvoker m_pluginInvoker;
+    MatchingTextFileReader m_matchingTextFileReader;
     BinaryFileReader m_binaryFileReader;
     TextFileReader m_textFileReader;
     EffectiveBinaryFileReader m_effectiveBinaryFileReader;
     EffectiveTextFileReader m_effectiveTextFileReader;
+    EffectiveFileEnumerator m_effectiveFileEnumerator;
+    EffectiveTextFilesReader m_effectiveTextFilesReader;
     BinaryFileWriter m_binaryFileWriter;
     TextFileWriter m_textFileWriter;
     PathRemover m_pathRemover;

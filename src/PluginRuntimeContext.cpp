@@ -65,12 +65,26 @@ void PluginRuntimeContext::setEffectiveFileEnumerator(EffectiveFileEnumerator en
     m_effectiveFileEnumerator = std::move(enumerator);
 }
 
-PluginRuntimeContext::EffectiveFileListResult PluginRuntimeContext::listEffectiveFiles() const {
+PluginRuntimeContext::EffectiveFileListResult PluginRuntimeContext::listEffectiveFiles(const QString& relativeRoot,
+                                                                                       const QString& suffixFilter) const {
     if (!m_effectiveFileEnumerator) {
         return {false, {}, "Effective file enumerator is not available."};
     }
 
-    return m_effectiveFileEnumerator();
+    return m_effectiveFileEnumerator(relativeRoot, suffixFilter);
+}
+
+void PluginRuntimeContext::setEffectiveTextFilesReader(EffectiveTextFilesReader reader) {
+    m_effectiveTextFilesReader = std::move(reader);
+}
+
+PluginRuntimeContext::MatchingTextFilesResult PluginRuntimeContext::readEffectiveTextFiles(const QString& relativeRoot,
+                                                                                           const QString& suffixFilter) const {
+    if (!m_effectiveTextFilesReader) {
+        return {false, {}, "Effective text files reader is not available."};
+    }
+
+    return m_effectiveTextFilesReader(relativeRoot, suffixFilter);
 }
 
 QString PluginRuntimeContext::fileRootToString(FileRoot root) {

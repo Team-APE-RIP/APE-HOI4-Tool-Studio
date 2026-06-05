@@ -1,0 +1,9 @@
+tool: "10000001|FileManagerTool"
+tool: "10000002|LogManagerTool"
+tool: "10000003|FlagManagerTool"
+tool: "10000004|FontManagerTool"
+
+plugin: "20000001|APEHOI4Parser"
+plugin: "20000004|TagList"
+plugin: "20000005|DryadAtlas"
+plugin: "20000006|Lumorpha"

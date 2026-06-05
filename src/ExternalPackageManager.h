@@ -56,6 +56,8 @@ public:
     static ImportResult importPluginPackage(const QString& descriptorPath,
                                             QWidget* parent,
                                             bool skipOverwritePrompt = false);
+    static bool removeInstalledToolPackage(const QString& toolId, QString* errorMessage = nullptr);
+    static bool removeInstalledPluginPackage(const QString& pluginId, QString* errorMessage = nullptr);
 
 private:
     static QString pendingRestartRequestFilePath();
@@ -63,8 +65,8 @@ private:
     static RequestType requestTypeFromString(const QString& value);
     static QString appToolsRootPath();
     static QString appPluginsRootPath();
-    static QString buildInstalledToolDescriptorPath(const QString& toolName);
-    static QString buildInstalledPluginDescriptorPath(const QString& pluginName);
+    static QString buildInstalledToolDescriptorPath(const QString& toolId);
+    static QString buildInstalledPluginDescriptorPath(const QString& pluginId);
     static bool isSamePath(const QString& left, const QString& right);
     static QString findAppManagedRoot(const QString& childDirectoryName);
     static bool ensureDirectoryExists(const QString& path, QString* errorMessage);

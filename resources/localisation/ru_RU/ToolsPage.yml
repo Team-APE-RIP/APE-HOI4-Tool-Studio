@@ -4,3 +4,8 @@ l_ru_RU:
   RequiresApp: "Требуется приложение v%1"
   CurrentApp: "Текущее приложение v%2"
   MismatchWarning: "Это может вызвать проблемы."
+  UninstallTool: "Удалить"
+  OfficialToolProtected: "Официальные инструменты нельзя удалить."
+  UninstallToolTitle: "Удаление инструмента"
+  UninstallToolMessage: "Удалить %1 и его файлы?"
+  UninstallToolFailedTitle: "Не удалось удалить инструмент"

@@ -8,6 +8,7 @@
 //-------------------------------------------------------------------------------------
 #include "AgreementEvidenceManager.h"
 
+#include "ApiRequests.h"
 #include "AuthManager.h"
 #include "HttpClient.h"
 #include "Logger.h"
@@ -327,17 +328,8 @@ void AgreementEvidenceManager::postEventsBatch(const QByteArray& requestBody, QO
         return;
     }
 
-    HttpRequestOptions options = HttpClient::createJsonPost(
-        QUrl(AuthManager::buildApiUrl("/api/v1/agreement/events")),
-        requestBody
-    );
-    HttpClient::addOrReplaceHeader(options, "Authorization", QString("Bearer %1").arg(AuthManager::instance().getToken()).toUtf8());
-    HttpClient::addOrReplaceHeader(options, "X-APE-Agreement-Client", "desktop-registry-evidence");
-    options.category = HttpRequestCategory::Auth;
-    options.timeoutMs = 15000;
-    options.connectTimeoutMs = 5000;
-    options.maxRetries = 1;
-    options.retryOnHttp5xx = true;
+    HttpRequestOptions options = ApiRequests::createAgreementEventsRequest(requestBody);
+    ApiRequests::applyBearerAuthorization(options, AuthManager::instance().getToken());
 
     HttpClient::instance().send(options, context ? context : this, [this](const HttpResponse& response) {
         if (!response.success) {

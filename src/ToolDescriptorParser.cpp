@@ -82,9 +82,12 @@ bool parseDescriptorFile(const QString& filePath, QJsonObject& outMetaData, QStr
     file.close();
 
     QString name;
+    QString id;
     QString version;
     QString supportedVersion;
     QString author;
+    QString guiPreset;
+    QString workerId;
     QJsonArray dependencies;
 
     for (int i = 0; i < lines.size(); ++i) {
@@ -107,7 +110,9 @@ bool parseDescriptorFile(const QString& filePath, QJsonObject& outMetaData, QStr
             continue;
         }
 
-        if (key == "name") {
+        if (key == "id") {
+            id = value;
+        } else if (key == "name") {
             name = value;
         } else if (key == "version") {
             version = value;
@@ -115,6 +120,10 @@ bool parseDescriptorFile(const QString& filePath, QJsonObject& outMetaData, QStr
             supportedVersion = value;
         } else if (key == "author") {
             author = value;
+        } else if (key == "gui_preset") {
+            guiPreset = value;
+        } else if (key == "worker_id") {
+            workerId = value;
         }
     }
 
@@ -125,11 +134,21 @@ bool parseDescriptorFile(const QString& filePath, QJsonObject& outMetaData, QStr
         return false;
     }
 
+    if (id.isEmpty()) {
+        if (errorMessage) {
+            *errorMessage = QString("Descriptor missing id: %1").arg(filePath);
+        }
+        return false;
+    }
+
     outMetaData = QJsonObject{
-        {"id", name},
+        {"id", id},
+        {"name", name},
         {"version", version},
         {"compatibleVersion", supportedVersion},
         {"author", author},
+        {"guiPreset", guiPreset},
+        {"workerId", workerId},
         {"dependencies", dependencies}
     };
 

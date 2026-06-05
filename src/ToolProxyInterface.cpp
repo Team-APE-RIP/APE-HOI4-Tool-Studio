@@ -12,16 +12,15 @@
 #include "ConfigManager.h"
 #include "LocalizationManager.h"
 #include "ToolDescriptorParser.h"
-#include "PluginManager.h"
+#include "PluginAbiBroker.h"
 #include "ToolRuntimeContext.h"
-#include <QVBoxLayout>
 #include <QCoreApplication>
 #include <QFile>
 #include <QJsonDocument>
+#include <QStringConverter>
+#include <QTextStream>
 #include <QUuid>
 #include <QDir>
-#include <QElapsedTimer>
-#include <QShowEvent>
 
 #ifdef Q_OS_WIN
 #include <windows.h>
@@ -76,289 +75,52 @@ QJsonArray makeDirectoryEntriesJson(const QList<ToolRuntimeContext::DirectoryEnt
     }
     return array;
 }
+
+QJsonArray makeMatchingTextFileEntriesJson(const QList<ToolRuntimeContext::TextFileMatchEntry>& entries) {
+    QJsonArray array;
+    for (const ToolRuntimeContext::TextFileMatchEntry& entry : entries) {
+        QJsonObject object;
+        object["relativePath"] = entry.relativePath;
+        object["name"] = entry.name;
+        object["content"] = entry.content;
+        array.append(object);
+    }
+    return array;
+}
+
+QJsonArray makeEffectiveFileEntriesJson(const QList<ToolRuntimeContext::EffectiveFileEntry>& entries) {
+    QJsonArray array;
+    for (const ToolRuntimeContext::EffectiveFileEntry& entry : entries) {
+        QJsonObject object;
+        object["logicalPath"] = entry.logicalPath;
+        object["source"] = ToolRuntimeContext::effectiveFileSourceToString(entry.source);
+        object["lastModifiedMs"] = QString::number(entry.lastModifiedMs);
+        array.append(object);
+    }
+    return array;
+}
+
+QJsonObject statePacketToJsonObject(const ToolUiStatePacket& packet) {
+    QJsonObject object;
+    object["pageId"] = packet.pageId;
+    object["modeId"] = packet.modeId;
+    object["viewState"] = QJsonObject::fromVariantMap(packet.viewState);
+    object["sidebarState"] = QJsonObject::fromVariantMap(packet.sidebarState);
+    object["topbarState"] = QJsonObject::fromVariantMap(packet.topbarState);
+    object["runtimeVariables"] = QJsonObject::fromVariantMap(packet.runtimeVariables);
+    object["listModels"] = QJsonArray::fromVariantList(packet.listModels);
+    object["patches"] = QJsonArray::fromVariantList(packet.patches);
+    return object;
+}
+
+QVariantMap toVariantMap(const QMap<QString, QString>& strings) {
+    QVariantMap variantMap;
+    for (auto iterator = strings.constBegin(); iterator != strings.constEnd(); ++iterator) {
+        variantMap.insert(iterator.key(), iterator.value());
+    }
+    return variantMap;
+}
 } // namespace
-
-// ============================================================================
-// ToolEmbedContainer Implementation
-// ============================================================================
-
-ToolEmbedContainer::ToolEmbedContainer(QWidget* parent)
-    : QWidget(parent)
-    , m_foreignWindow(nullptr)
-    , m_container(nullptr)
-#ifdef Q_OS_WIN
-    , m_childHwnd(nullptr)
-#endif
-{
-    QVBoxLayout* layout = new QVBoxLayout(this);
-    layout->setContentsMargins(0, 0, 0, 0);
-    layout->setSpacing(0);
-    
-    // Make container transparent so embedded window is visible
-    setAttribute(Qt::WA_TranslucentBackground, false);
-    setAttribute(Qt::WA_NoSystemBackground, false);
-    setAutoFillBackground(false);
-}
-
-ToolEmbedContainer::~ToolEmbedContainer() {
-    releaseWindow();
-}
-
-bool ToolEmbedContainer::embedWindow(WId windowId) {
-    releaseWindow();
-    
-#ifdef Q_OS_WIN
-    // Use Windows API to embed the window
-    HWND childHwnd = reinterpret_cast<HWND>(windowId);
-    HWND parentHwnd = reinterpret_cast<HWND>(this->winId());
-    
-    Logger::instance().logInfo("ToolEmbedContainer", 
-        QString("[Embed] Start - childHwnd: %1, parentHwnd: %2").arg((qulonglong)childHwnd).arg((qulonglong)parentHwnd));
-    
-    if (!IsWindow(childHwnd)) {
-        Logger::instance().logError("ToolEmbedContainer", "[Embed] Invalid child window handle");
-        return false;
-    }
-    
-    // Check initial state of child window
-    BOOL initialVisible = IsWindowVisible(childHwnd);
-    RECT initialRect;
-    GetWindowRect(childHwnd, &initialRect);
-    LONG initialStyle = GetWindowLong(childHwnd, GWL_STYLE);
-    LONG initialExStyle = GetWindowLong(childHwnd, GWL_EXSTYLE);
-    
-    Logger::instance().logInfo("ToolEmbedContainer", 
-        QString("[Embed] Child initial state - Visible: %1, Rect: %2,%3,%4,%5, Style: %6, ExStyle: %7")
-        .arg(initialVisible)
-        .arg(initialRect.left).arg(initialRect.top).arg(initialRect.right).arg(initialRect.bottom)
-        .arg(initialStyle, 0, 16).arg(initialExStyle, 0, 16));
-    
-    Logger::instance().logInfo("ToolEmbedContainer", 
-        QString("[Embed] Container size: %1x%2, visible: %3").arg(width()).arg(height()).arg(isVisible()));
-    
-    // Store the window ID for later use FIRST
-    m_foreignWindow = QWindow::fromWinId(windowId);
-    m_childHwnd = childHwnd;
-    
-    // Get container size - use actual size or default if not yet sized
-    // IMPORTANT: Container may not be sized yet when first created, use reasonable defaults
-    int w = (width() > 100) ? width() : 800;
-    int h = (height() > 100) ? height() : 600;
-    
-    // CRITICAL: First modify window styles to make it a child window BEFORE SetParent
-    // This prevents the window from appearing briefly as a top-level window
-    Logger::instance().logInfo("ToolEmbedContainer", "[Embed] Pre-modifying window styles...");
-    LONG style = GetWindowLong(childHwnd, GWL_STYLE);
-    style &= ~(WS_POPUP | WS_CAPTION | WS_THICKFRAME | WS_MINIMIZEBOX | WS_MAXIMIZEBOX | WS_SYSMENU | WS_OVERLAPPEDWINDOW);
-    style |= WS_CHILD | WS_CLIPCHILDREN | WS_CLIPSIBLINGS;  // Don't add WS_VISIBLE yet
-    SetWindowLong(childHwnd, GWL_STYLE, style);
-    
-    // Remove extended styles that cause issues
-    LONG exStyle = GetWindowLong(childHwnd, GWL_EXSTYLE);
-    exStyle &= ~(WS_EX_APPWINDOW | WS_EX_TOOLWINDOW | WS_EX_WINDOWEDGE);
-    SetWindowLong(childHwnd, GWL_EXSTYLE, exStyle);
-    
-    // Set parent AFTER changing styles
-    Logger::instance().logInfo("ToolEmbedContainer", "[Embed] Calling SetParent...");
-    HWND oldParent = SetParent(childHwnd, parentHwnd);
-    DWORD setParentError = GetLastError();
-    Logger::instance().logInfo("ToolEmbedContainer", 
-        QString("[Embed] SetParent result - oldParent: %1, error: %2").arg((qulonglong)oldParent).arg(setParentError));
-    
-    if (oldParent == NULL && setParentError != 0) {
-        Logger::instance().logError("ToolEmbedContainer", 
-            QString("[Embed] SetParent failed with error: %1").arg(setParentError));
-        return false;
-    }
-    
-    // Now add WS_VISIBLE style after SetParent
-    style = GetWindowLong(childHwnd, GWL_STYLE);
-    style |= WS_VISIBLE;
-    SetWindowLong(childHwnd, GWL_STYLE, style);
-    
-    LONG newStyle = GetWindowLong(childHwnd, GWL_STYLE);
-    LONG newExStyle = GetWindowLong(childHwnd, GWL_EXSTYLE);
-    Logger::instance().logInfo("ToolEmbedContainer", 
-        QString("[Embed] After style change - Style: %1, ExStyle: %2").arg(newStyle, 0, 16).arg(newExStyle, 0, 16));
-    
-    // Position and show the window
-    Logger::instance().logInfo("ToolEmbedContainer", QString("[Embed] Calling SetWindowPos with size %1x%2").arg(w).arg(h));
-    BOOL posResult = SetWindowPos(childHwnd, HWND_TOP, 0, 0, w, h, 
-                 SWP_SHOWWINDOW | SWP_FRAMECHANGED | SWP_NOACTIVATE);
-    Logger::instance().logInfo("ToolEmbedContainer", QString("[Embed] SetWindowPos result: %1").arg(posResult));
-    
-    // Force multiple redraws to ensure content is visible
-    ShowWindow(childHwnd, SW_SHOW);
-    InvalidateRect(childHwnd, NULL, TRUE);
-    UpdateWindow(childHwnd);
-    RedrawWindow(childHwnd, NULL, NULL, RDW_INVALIDATE | RDW_UPDATENOW | RDW_ALLCHILDREN);
-    
-    // Also invalidate the parent container
-    InvalidateRect(parentHwnd, NULL, TRUE);
-    UpdateWindow(parentHwnd);
-    
-    // Check final state
-    BOOL finalVisible = IsWindowVisible(childHwnd);
-    RECT finalRect;
-    GetWindowRect(childHwnd, &finalRect);
-    RECT clientRect;
-    GetClientRect(childHwnd, &clientRect);
-    
-    Logger::instance().logInfo("ToolEmbedContainer", 
-        QString("[Embed] Final state - Visible: %1, WindowRect: %2,%3,%4,%5, ClientRect: %6,%7,%8,%9")
-        .arg(finalVisible)
-        .arg(finalRect.left).arg(finalRect.top).arg(finalRect.right).arg(finalRect.bottom)
-        .arg(clientRect.left).arg(clientRect.top).arg(clientRect.right).arg(clientRect.bottom));
-    
-    Logger::instance().logInfo("ToolEmbedContainer", "[Embed] Complete");
-    return true;
-#else
-    // Fallback for non-Windows platforms
-    m_foreignWindow = QWindow::fromWinId(windowId);
-    if (!m_foreignWindow) {
-        Logger::instance().logError("ToolEmbedContainer", "Failed to create QWindow from WinId");
-        return false;
-    }
-    
-    m_container = QWidget::createWindowContainer(m_foreignWindow, this);
-    if (!m_container) {
-        Logger::instance().logError("ToolEmbedContainer", "Failed to create window container");
-        m_foreignWindow = nullptr;
-        return false;
-    }
-    
-    layout()->addWidget(m_container);
-    m_container->show();
-    
-    Logger::instance().logInfo("ToolEmbedContainer", QString("Embedded window %1").arg(windowId));
-    return true;
-#endif
-}
-
-void ToolEmbedContainer::releaseWindow() {
-#ifdef Q_OS_WIN
-    if (m_foreignWindow) {
-        HWND childHwnd = reinterpret_cast<HWND>(m_foreignWindow->winId());
-        if (IsWindow(childHwnd)) {
-            // Hide the window first to prevent it from appearing on desktop
-            ShowWindow(childHwnd, SW_HIDE);
-            // Don't call SetParent(NULL) - let the process termination handle cleanup
-            // This prevents the window from appearing at screen corner
-        }
-    }
-#endif
-    if (m_container) {
-        layout()->removeWidget(m_container);
-        delete m_container;
-        m_container = nullptr;
-    }
-    m_foreignWindow = nullptr;
-}
-
-void ToolEmbedContainer::setPendingWindowId(WId windowId) {
-    m_pendingWindowId = windowId;
-    m_embedded = false;
-    Logger::instance().logInfo("ToolEmbedContainer", 
-        QString("setPendingWindowId: %1").arg(windowId));
-}
-
-void ToolEmbedContainer::showEvent(QShowEvent* event) {
-    QWidget::showEvent(event);
-    
-    Logger::instance().logInfo("ToolEmbedContainer", 
-        QString("showEvent - firstShow: %1, pendingWindowId: %2, embedded: %3, size: %4x%5")
-        .arg(m_firstShow).arg(m_pendingWindowId).arg(m_embedded).arg(width()).arg(height()));
-    
-    // On first show, if we have a pending window ID, embed it
-    if (m_firstShow && m_pendingWindowId != 0 && !m_embedded) {
-        m_firstShow = false;
-        // Use a longer delay to ensure the container is fully laid out and has valid size
-        // Also process events to ensure layout is complete
-        QTimer::singleShot(100, this, [this]() {
-            // Process events to ensure layout is complete
-            QCoreApplication::processEvents();
-            
-            // Check if we have a valid size, if not, wait a bit more
-            if (width() < 100 || height() < 100) {
-                Logger::instance().logInfo("ToolEmbedContainer", 
-                    QString("Container size too small (%1x%2), waiting...").arg(width()).arg(height()));
-                QTimer::singleShot(100, this, &ToolEmbedContainer::doEmbed);
-            } else {
-                doEmbed();
-            }
-        });
-    }
-}
-
-void ToolEmbedContainer::doEmbed() {
-    if (m_pendingWindowId == 0 || m_embedded) {
-        return;
-    }
-    
-    Logger::instance().logInfo("ToolEmbedContainer", 
-        QString("doEmbed - windowId: %1, container size: %2x%3")
-        .arg(m_pendingWindowId).arg(width()).arg(height()));
-    
-    bool success = embedWindow(m_pendingWindowId);
-    m_embedded = success;
-    
-    if (success) {
-        Logger::instance().logInfo("ToolEmbedContainer", "doEmbed succeeded");
-        
-        // Schedule another refresh after a short delay
-        QTimer::singleShot(100, [this]() {
-#ifdef Q_OS_WIN
-            if (m_childHwnd) {
-                HWND childHwnd = reinterpret_cast<HWND>(m_childHwnd);
-                if (IsWindow(childHwnd)) {
-                    int w = width();
-                    int h = height();
-                    Logger::instance().logInfo("ToolEmbedContainer", 
-                        QString("Post-embed refresh: %1x%2").arg(w).arg(h));
-                    ShowWindow(childHwnd, SW_SHOW);
-                    SetWindowPos(childHwnd, HWND_TOP, 0, 0, w, h, 
-                                 SWP_SHOWWINDOW | SWP_FRAMECHANGED);
-                    InvalidateRect(childHwnd, NULL, TRUE);
-                    UpdateWindow(childHwnd);
-                    RedrawWindow(childHwnd, NULL, NULL, RDW_INVALIDATE | RDW_UPDATENOW | RDW_ALLCHILDREN);
-                }
-            }
-#endif
-            update();
-        });
-    } else {
-        Logger::instance().logError("ToolEmbedContainer", "doEmbed failed");
-    }
-    
-    emit embeddingComplete(success);
-}
-
-void ToolEmbedContainer::resizeEvent(QResizeEvent* event) {
-    QWidget::resizeEvent(event);
-    
-    Logger::instance().logInfo("ToolEmbedContainer", 
-        QString("resizeEvent - size: %1x%2, embedded: %3")
-        .arg(width()).arg(height()).arg(m_embedded));
-    
-#ifdef Q_OS_WIN
-    if (m_childHwnd && m_embedded) {
-        HWND childHwnd = reinterpret_cast<HWND>(m_childHwnd);
-        if (IsWindow(childHwnd)) {
-            SetWindowPos(childHwnd, HWND_TOP, 0, 0, width(), height(), SWP_NOZORDER | SWP_SHOWWINDOW);
-            // Force repaint
-            InvalidateRect(childHwnd, NULL, TRUE);
-            UpdateWindow(childHwnd);
-        }
-    }
-#else
-    if (m_container) {
-        m_container->resize(size());
-    }
-#endif
-    
-    // Emit signal to notify parent that resize happened
-    emit resized(width(), height());
-}
 
 // ============================================================================
 // ToolProxyInterface Implementation
@@ -386,7 +148,9 @@ ToolProxyInterface::~ToolProxyInterface() {
 }
 
 void ToolProxyInterface::setMetaData(const QJsonObject& metaData) {
+    m_metaData = metaData;
     m_toolInfo.id = metaData.value("id").toString();
+    m_toolInfo.name = metaData.value("name").toString();
     m_toolInfo.version = metaData.value("version").toString();
     m_toolInfo.compatibleVersion = metaData.value("compatibleVersion").toString();
     m_toolInfo.author = metaData.value("author").toString();
@@ -402,6 +166,9 @@ static QMap<QString, QString> parseSimpleYamlFile(const QString& path) {
     }
 
     QTextStream stream(&file);
+#if QT_VERSION >= QT_VERSION_CHECK(6, 0, 0)
+    stream.setEncoding(QStringConverter::Utf8);
+#endif
     bool insideRoot = false;
 
     auto unquoteValue = [](QString value) {
@@ -446,12 +213,64 @@ static QMap<QString, QString> parseSimpleYamlFile(const QString& path) {
     return result;
 }
 
-static QString languageNameToCode(const QString& langName) {
-    if (langName == "zh_CN" || langName == "zh_TW" || langName == "en_US") return langName;
-    if (langName == "简体中文") return "zh_CN";
-    if (langName == "繁體中文") return "zh_TW";
-    if (langName == "English") return "en_US";
-    return "en_US";
+static QMap<QString, QString> parseMetaFile(const QString& path) {
+    QMap<QString, QString> result;
+    QFile file(path);
+    if (!file.open(QIODevice::ReadOnly | QIODevice::Text)) {
+        return result;
+    }
+
+    QTextStream stream(&file);
+#if QT_VERSION >= QT_VERSION_CHECK(6, 0, 0)
+    stream.setEncoding(QStringConverter::Utf8);
+#endif
+    while (!stream.atEnd()) {
+        const QString line = stream.readLine().trimmed();
+        if (line.isEmpty() || line.startsWith('#') || line.startsWith(QStringLiteral("//"))) {
+            continue;
+        }
+
+        const int equalsIndex = line.indexOf('=');
+        if (equalsIndex <= 0) {
+            continue;
+        }
+
+        const QString key = line.left(equalsIndex).trimmed();
+        QString value = line.mid(equalsIndex + 1).trimmed();
+        if ((value.startsWith('"') && value.endsWith('"')) || (value.startsWith('\'') && value.endsWith('\''))) {
+            value = value.mid(1, value.length() - 2);
+        }
+        result.insert(key, value);
+    }
+
+    return result;
+}
+
+static QString resolveToolLanguageCode(const QString& toolDir, const QString& requestedValue) {
+    const QString normalized = requestedValue.trimmed();
+    const QString localisationRootPath = QDir(toolDir).filePath(QStringLiteral("localisation"));
+    QDir localisationRoot(localisationRootPath);
+
+    if (!normalized.isEmpty() && localisationRoot.exists(normalized)) {
+        return normalized;
+    }
+
+    const QStringList languageDirectories = localisationRoot.entryList(QDir::Dirs | QDir::NoDotAndDotDot, QDir::Name);
+    for (const QString& dirName : languageDirectories) {
+        const QMap<QString, QString> meta = parseMetaFile(localisationRoot.filePath(dirName + QStringLiteral("/meta.htsl")));
+        if (normalized == meta.value(QStringLiteral("lang"))
+            || normalized == meta.value(QStringLiteral("text"))) {
+            return dirName;
+        }
+    }
+
+    if (localisationRoot.exists(QStringLiteral("en_US"))) {
+        return QStringLiteral("en_US");
+    }
+    if (!languageDirectories.isEmpty()) {
+        return languageDirectories.first();
+    }
+    return QStringLiteral("en_US");
 }
 
 void ToolProxyInterface::preloadInfo() {
@@ -466,25 +285,25 @@ void ToolProxyInterface::preloadInfo() {
         return;
     }
 
-    // Try to load localized name/description - use current language
-    QString currentLang = ConfigManager::instance().getLanguage();
-    QString langCode = languageNameToCode(currentLang);
-    QString locPath = m_toolDir + "/localisation/" + langCode + "/strings.yml";
-    QMap<QString, QString> locObj = parseSimpleYamlFile(locPath);
+    LocalizationManager& localizationManager = LocalizationManager::instance();
+    const QString currentLang = ConfigManager::instance().getLanguage();
+    const QJsonObject configJson = ConfigManager::instance().toJson();
+    m_currentLanguageCode = localizationManager.resolveToolLanguageCode(m_toolDir, currentLang);
+    m_localizedStrings = localizationManager.loadToolStrings(m_toolDir, currentLang);
+    m_currentGameLanguageCode = configJson.value(QStringLiteral("gameLanguage")).toString();
+    m_currentGameLanguageNames = configJson.value(QStringLiteral("gameLanguageNames")).toObject();
 
-    if (locObj.isEmpty()) {
-        locPath = m_toolDir + "/localisation/en_US/strings.yml";
-        locObj = parseSimpleYamlFile(locPath);
+    if (m_localizedStrings.contains("Name")) {
+        m_toolInfo.name = m_localizedStrings.value("Name");
+    }
+    if (m_localizedStrings.contains("Description")) {
+        m_toolInfo.description = m_localizedStrings.value("Description");
     }
 
-    if (locObj.contains("Name")) {
-        m_toolInfo.name = locObj.value("Name");
-    }
-    if (locObj.contains("Description")) {
-        m_toolInfo.description = locObj.value("Description");
-    }
-
-    Logger::instance().logInfo("ToolProxyInterface", "Preloaded info for tool: " + m_toolInfo.id + " with language: " + langCode);
+    Logger::instance().logInfo(
+        "ToolProxyInterface",
+        "Preloaded info for tool: " + m_toolInfo.id + " with language: " + m_currentLanguageCode
+    );
 }
 
 QIcon ToolProxyInterface::icon() const {
@@ -504,30 +323,50 @@ void ToolProxyInterface::initialize() {
 }
 
 bool ToolProxyInterface::startProcess() {
+    // Check if process is already running and healthy
     if (m_process && m_process->state() != QProcess::NotRunning) {
-        Logger::instance().logWarning("ToolProxyInterface", "Process already running");
-        return true;
+        if (!m_sessionUnavailable && !m_stopping) {
+            Logger::instance().logInfo("ToolProxyInterface", "Process already running, reusing existing process session");
+            return true;
+        }
+
+        Logger::instance().logWarning("ToolProxyInterface", "Discarding unavailable process before starting a new session");
+        discardProcess();
     }
 
-    m_stopping = false;
-    m_processReady = false;
-    m_pendingRequests.clear();
-    m_buffer.clear();
+    // Only reset state if we're actually starting a new process
+    const bool needsNewProcess = !m_process || m_process->state() == QProcess::NotRunning;
+    
+    if (needsNewProcess) {
+        m_stopping = false;
+        m_processReady = false;
+        m_sessionUnavailable = false;
+        m_sessionUnavailableReason.clear();
+        m_initialStateQueryPending = false;
+        m_pendingRequests.clear();
+        m_buffer.clear();
+        stopHeartbeatTimers();
 
-    if (m_socket) {
-        m_socket->abort();
-        m_socket = nullptr;
-    }
+        if (m_socket) {
+            m_socket->abort();
+            m_socket->deleteLater();
+            m_socket = nullptr;
+        }
 
-    if (m_server) {
-        m_server->close();
-        delete m_server;
-        m_server = nullptr;
-    }
+        if (m_server) {
+            m_server->close();
+            delete m_server;
+            m_server = nullptr;
+        }
 
-    if (m_process) {
-        delete m_process;
-        m_process = nullptr;
+        if (m_process) {
+            delete m_process;
+            m_process = nullptr;
+        }
+    } else {
+        // Process exists but not healthy, just return false
+        Logger::instance().logError("ToolProxyInterface", "Process in inconsistent state, cannot start");
+        return false;
     }
     
     // Create IPC server
@@ -559,11 +398,29 @@ bool ToolProxyInterface::startProcess() {
         Logger::instance().logError("ToolHost", QString::fromUtf8(m_process->readAllStandardError()));
     });
     
-    // Use the main application itself as the tool host (with --tool-host argument)
-    QString appPath = QCoreApplication::applicationFilePath();
+    // Use the standalone ToolHost executable (non-GUI process)
+    QString appDir = QCoreApplication::applicationDirPath();
+    QString toolHostPath = QDir(appDir).filePath("ToolHost.exe");
+    
+    if (!QFile::exists(toolHostPath)) {
+        Logger::instance().logError("ToolProxyInterface", "ToolHost.exe not found at: " + toolHostPath);
+        if (m_process) {
+            m_process->deleteLater();
+            m_process = nullptr;
+        }
+        if (m_server) {
+            m_server->close();
+            m_server->deleteLater();
+            m_server = nullptr;
+        }
+        return false;
+    }
+
+    QString workerPath = m_toolPath;
+    const QString descriptorToolName = m_metaData.value(QStringLiteral("name")).toString(m_toolInfo.name).trimmed();
     
     QStringList args;
-    args << "--tool-host" << m_serverName << m_toolPath << m_toolInfo.name;
+    args << m_serverName << workerPath << descriptorToolName;
     
     // Pass log file path to subprocess so logs are merged
     QString logPath = Logger::instance().logFilePath();
@@ -571,8 +428,7 @@ bool ToolProxyInterface::startProcess() {
         args << "--log-file" << logPath;
     }
     
-    Logger::instance().logInfo("ToolProxyInterface", QString("Starting tool subprocess: %1 %2").arg(appPath, args.join(" ")));
-    m_process->start(appPath, args);
+    m_process->start(toolHostPath, args);
     
     return true;
 }
@@ -598,6 +454,8 @@ void ToolProxyInterface::stopProcess() {
     
     m_stopping = true;
     m_processReady = false;
+    m_sessionUnavailable = false;
+    m_sessionUnavailableReason.clear();
     m_pendingRequests.clear();
     m_buffer.clear();
     
@@ -611,15 +469,6 @@ void ToolProxyInterface::stopProcess() {
         m_heartbeatTimeoutTimer->stop();
         delete m_heartbeatTimeoutTimer;
         m_heartbeatTimeoutTimer = nullptr;
-    }
-    
-    if (m_mainContainer) {
-        Logger::instance().logInfo("ToolProxyInterface", "Releasing main container window");
-        m_mainContainer->releaseWindow();
-    }
-    if (m_sidebarContainer) {
-        Logger::instance().logInfo("ToolProxyInterface", "Releasing sidebar container window");
-        m_sidebarContainer->releaseWindow();
     }
     
     if (m_socket && m_socket->state() == QLocalSocket::ConnectedState) {
@@ -687,6 +536,8 @@ void ToolProxyInterface::forceKillProcess() {
     
     m_stopping = true;
     m_processReady = false;
+    m_sessionUnavailable = false;
+    m_sessionUnavailableReason.clear();
     m_pendingRequests.clear();
     m_buffer.clear();
     
@@ -701,13 +552,6 @@ void ToolProxyInterface::forceKillProcess() {
         m_heartbeatTimeoutTimer = nullptr;
     }
     
-    if (m_mainContainer) {
-        m_mainContainer->releaseWindow();
-    }
-    if (m_sidebarContainer) {
-        m_sidebarContainer->releaseWindow();
-    }
-
     if (m_socket && m_socket->state() == QLocalSocket::ConnectedState) {
         sendMessage(ToolIpc::MessageType::Shutdown);
         m_socket->flush();
@@ -752,235 +596,163 @@ void ToolProxyInterface::forceKillProcess() {
     emit processStopped();
 }
 
-bool ToolProxyInterface::isProcessRunning() const {
-    return m_process && m_process->state() == QProcess::Running && m_processReady && !m_stopping;
-}
+void ToolProxyInterface::discardProcess() {
+    if (m_stopping) {
+        return;
+    }
 
-QWidget* ToolProxyInterface::createWidget(QWidget* parent) {
-    Logger::instance().logInfo("ToolProxyInterface", "createWidget called");
-    
-    if (!isProcessRunning()) {
-        Logger::instance().logInfo("ToolProxyInterface", "Process not running, starting...");
-        if (!startProcess()) {
-            Logger::instance().logError("ToolProxyInterface", "Failed to start tool process");
-            return nullptr;
+    Logger::instance().logInfo(
+        "ToolProxyInterface",
+        QString("Discarding worker process for tool: %1").arg(m_toolInfo.id)
+    );
+
+    m_stopping = true;
+    m_processReady = false;
+    m_sessionUnavailable = false;
+    m_initialStateQueryPending = false;
+    m_sessionUnavailableReason.clear();
+    m_pendingRequests.clear();
+    m_buffer.clear();
+    stopHeartbeatTimers();
+
+    if (m_socket) {
+        if (m_socket->state() == QLocalSocket::ConnectedState) {
+            sendMessage(ToolIpc::MessageType::Shutdown);
+            m_socket->flush();
         }
-        
-        // Wait for process to be ready with shorter intervals
-        int waitCount = 0;
-        const int maxWait = 100; // 100 * 50ms = 5 seconds max
-        while (!m_processReady && waitCount < maxWait) {
-            QCoreApplication::processEvents(QEventLoop::AllEvents, 10);
-            QThread::msleep(40);
-            waitCount++;
-        }
-        
-        if (!m_processReady) {
-            Logger::instance().logError("ToolProxyInterface", "Tool process did not become ready in time");
-            forceKillProcess();
-            return nullptr;
-        }
-        Logger::instance().logInfo("ToolProxyInterface", "Process is ready");
+        m_socket->disconnect(this);
+        m_socket->abort();
+        m_socket->deleteLater();
+        m_socket = nullptr;
     }
-    
-    // Create container widget with a reasonable initial size
-    // DO NOT call show() here - let the layout system handle it
-    m_mainContainer = new ToolEmbedContainer(parent);
-    m_mainContainer->setAttribute(Qt::WA_NativeWindow);
-    m_mainContainer->setMinimumSize(400, 300);  // Set minimum size
-    m_mainContainer->winId(); // Force native window creation
-    
-    Logger::instance().logInfo("ToolProxyInterface", 
-        QString("Container created, size: %1x%2")
-        .arg(m_mainContainer->width()).arg(m_mainContainer->height()));
-    
-    // Request widget creation from subprocess
-    bool success = false;
-    WId windowId = 0;
-    bool responseReceived = false;
-    
-    sendRequest(ToolIpc::MessageType::CreateWidget, QJsonObject(), 
-        [&](const ToolIpc::Message& response) {
-            if (response.payload["success"].toBool()) {
-                ToolIpc::WindowHandle wh = ToolIpc::WindowHandle::fromJson(response.payload["window"].toObject());
-                windowId = static_cast<WId>(wh.handle);
-                success = true;
-                Logger::instance().logInfo("ToolProxyInterface", 
-                    QString("Received window handle: %1").arg(windowId));
-            } else {
-                Logger::instance().logError("ToolProxyInterface", 
-                    QString("CreateWidget failed: %1").arg(response.payload["error"].toString()));
-            }
-            responseReceived = true;
-        });
-    
-    // Wait for response with shorter intervals
-    int waitCount = 0;
-    const int maxWait = 200; // 200 * 25ms = 5 seconds max
-    while (!responseReceived && waitCount < maxWait) {
-        QCoreApplication::processEvents(QEventLoop::AllEvents, 5);
-        QThread::msleep(20);
-        waitCount++;
+
+    if (m_server) {
+        m_server->close();
+        m_server->deleteLater();
+        m_server = nullptr;
     }
-    
-    Logger::instance().logInfo("ToolProxyInterface", 
-        QString("Wait finished: success=%1, windowId=%2").arg(success).arg(windowId));
-    
-    if (success && windowId != 0) {
-        // Store the window ID for delayed embedding (will be embedded in showEvent)
-        m_pendingWindowId = windowId;
-        m_mainContainer->setPendingWindowId(windowId);
-        
-        // DO NOT send ShowWidget here - wait until embedding is complete
-        // Connect to resize signal to notify subprocess
-        connect(m_mainContainer, &ToolEmbedContainer::resized, 
-                [this](int w, int h) {
-            if (isProcessRunning()) {
-                QJsonObject payload;
-                payload["width"] = w;
-                payload["height"] = h;
-                payload["main"] = true;
-                sendMessage(ToolIpc::MessageType::ResizeWidget, payload);
-            }
-        });
-        
-        // Connect to embedding complete signal
-        connect(m_mainContainer, &ToolEmbedContainer::embeddingComplete, 
-                [this, windowId](bool embedSuccess) {
-            if (embedSuccess) {
-                Logger::instance().logInfo("ToolProxyInterface", "Embedding complete, now sending ShowWidget");
-                
-                // NOW tell the tool to show its widget (after embedding is done)
-                QJsonObject showPayload;
-                showPayload["main"] = true;
-                showPayload["sidebar"] = false;
-                sendMessage(ToolIpc::MessageType::ShowWidget, showPayload);
-                
-                // Schedule a delayed refresh to ensure window is visible after layout is complete
-                QTimer::singleShot(200, [this, windowId]() {
-                    if (m_mainContainer && m_mainContainer->isEmbedded()) {
+
+    QProcess* discardedProcess = m_process;
+    m_process = nullptr;
+
+    if (discardedProcess) {
+        discardedProcess->disconnect();
+        discardedProcess->setParent(nullptr);
+
+        if (discardedProcess->state() != QProcess::NotRunning) {
 #ifdef Q_OS_WIN
-                        HWND childHwnd = reinterpret_cast<HWND>(windowId);
-                        if (IsWindow(childHwnd)) {
-                            int w = m_mainContainer->width();
-                            int h = m_mainContainer->height();
-                            Logger::instance().logInfo("ToolProxyInterface", 
-                                QString("Final refresh: resizing to %1x%2").arg(w).arg(h));
-                            ShowWindow(childHwnd, SW_SHOW);
-                            SetWindowPos(childHwnd, HWND_TOP, 0, 0, w, h, 
-                                         SWP_SHOWWINDOW | SWP_FRAMECHANGED);
-                            InvalidateRect(childHwnd, NULL, TRUE);
-                            UpdateWindow(childHwnd);
-                            RedrawWindow(childHwnd, NULL, NULL, RDW_INVALIDATE | RDW_UPDATENOW | RDW_ALLCHILDREN);
-                            
-                            // Check visibility
-                            BOOL isVisible = IsWindowVisible(childHwnd);
-                            Logger::instance().logInfo("ToolProxyInterface", 
-                                QString("After final refresh - IsVisible: %1").arg(isVisible));
-                        }
+            HANDLE hProcess = OpenProcess(PROCESS_TERMINATE, FALSE, discardedProcess->processId());
+            if (hProcess) {
+                TerminateProcess(hProcess, 1);
+                CloseHandle(hProcess);
+            } else {
+                discardedProcess->kill();
+            }
+#else
+            discardedProcess->kill();
 #endif
-                        m_mainContainer->update();
-                    }
-                });
-            }
-        });
-        
-        Logger::instance().logInfo("ToolProxyInterface", "Container ready for delayed embedding");
-        return m_mainContainer;
-    }
-    
-    Logger::instance().logError("ToolProxyInterface", "Failed to create tool widget");
-    delete m_mainContainer;
-    m_mainContainer = nullptr;
-    return nullptr;
-}
-
-QWidget* ToolProxyInterface::createSidebarWidget(QWidget* parent) {
-    if (!isProcessRunning()) {
-        return nullptr;
-    }
-    
-    // Create container widget
-    m_sidebarContainer = new ToolEmbedContainer(parent);
-    m_sidebarContainer->setAttribute(Qt::WA_NativeWindow);
-    m_sidebarContainer->winId();
-    
-    // Request sidebar widget creation from subprocess
-    bool success = false;
-    WId windowId = 0;
-    bool responseReceived = false;
-    
-    sendRequest(ToolIpc::MessageType::CreateSidebarWidget, QJsonObject(), 
-        [&](const ToolIpc::Message& response) {
-            if (response.payload["success"].toBool()) {
-                ToolIpc::WindowHandle wh = ToolIpc::WindowHandle::fromJson(response.payload["window"].toObject());
-                windowId = static_cast<WId>(wh.handle);
-                success = true;
-            }
-            responseReceived = true;
-        });
-    
-    // Wait for response with processEvents to keep UI responsive
-    QElapsedTimer timer;
-    timer.start();
-    while (!responseReceived && timer.elapsed() < 5000) {
-        QCoreApplication::processEvents(QEventLoop::AllEvents, 50);
-    }
-    
-    if (success && windowId != 0) {
-        QThread::msleep(50);
-        if (m_sidebarContainer->embedWindow(windowId)) {
-            // Now tell the tool to show its sidebar widget
-            QJsonObject showPayload;
-            showPayload["main"] = false;
-            showPayload["sidebar"] = true;
-            sendMessage(ToolIpc::MessageType::ShowWidget, showPayload);
-            
-            return m_sidebarContainer;
+            QTimer::singleShot(1000, discardedProcess, [discardedProcess]() {
+                if (discardedProcess->state() != QProcess::NotRunning) {
+                    discardedProcess->kill();
+                }
+            });
+            connect(
+                discardedProcess,
+                QOverload<int, QProcess::ExitStatus>::of(&QProcess::finished),
+                discardedProcess,
+                &QObject::deleteLater
+            );
+        } else {
+            discardedProcess->deleteLater();
         }
     }
-    
-    // No sidebar or failed - this is okay, not all tools have sidebars
-    delete m_sidebarContainer;
-    m_sidebarContainer = nullptr;
-    return nullptr;
+
+    m_stopping = false;
+    emit processStopped();
 }
+
+bool ToolProxyInterface::isProcessRunning() const {
+    return m_process
+        && m_process->state() != QProcess::NotRunning
+        && !m_stopping
+        && !m_sessionUnavailable;
+}
+
+// Note: createWidget and createSidebarWidget methods removed
+// ToolProxyInterface now uses the new scripted UI architecture
 
 void ToolProxyInterface::loadLanguage(const QString& lang) {
-    // Convert display name to language code
-    QString langCode = languageNameToCode(lang);
-    
-    // Always update local cached info first
-    QString locPath = m_toolDir + "/localisation/" + langCode + "/strings.yml";
-    Logger::instance().logInfo("ToolProxyInterface",
-        QString("loadLanguage called for %1, lang=%2, code=%3, path=%4").arg(m_toolInfo.id, lang, langCode, locPath));
+    LocalizationManager& localizationManager = LocalizationManager::instance();
+    const QString resolvedLanguageCode = localizationManager.resolveToolLanguageCode(m_toolDir, lang);
+    const QMap<QString, QString> localizedStrings = localizationManager.loadToolStrings(m_toolDir, lang);
+    const QJsonObject configJson = ConfigManager::instance().toJson();
+    const QString gameLanguage = configJson.value(QStringLiteral("gameLanguage")).toString();
+    const QJsonObject gameLanguageNames = configJson.value(QStringLiteral("gameLanguageNames")).toObject();
+    const bool languageDidChange = m_currentLanguageCode != resolvedLanguageCode;
+    const bool stringsDidChange = m_localizedStrings != localizedStrings;
+    const bool gameLanguageDidChange = m_currentGameLanguageCode != gameLanguage;
+    const bool gameLanguageNamesDidChange = m_currentGameLanguageNames != gameLanguageNames;
 
-    QMap<QString, QString> locObj = parseSimpleYamlFile(locPath);
-    if (locObj.isEmpty()) {
-        locPath = m_toolDir + "/localisation/en_US/strings.yml";
-        locObj = parseSimpleYamlFile(locPath);
-    }
+    m_currentLanguageCode = resolvedLanguageCode;
+    m_localizedStrings = localizedStrings;
+    m_currentGameLanguageCode = gameLanguage;
+    m_currentGameLanguageNames = gameLanguageNames;
 
-    if (!locObj.isEmpty()) {
-        if (locObj.contains("Name")) {
-            m_toolInfo.name = locObj.value("Name");
+    Logger::instance().logInfo(
+        "ToolProxyInterface",
+        QString("loadLanguage called for %1, lang=%2, code=%3")
+            .arg(m_toolInfo.id, lang, m_currentLanguageCode)
+    );
+
+    if (!m_localizedStrings.isEmpty()) {
+        if (m_localizedStrings.contains("Name")) {
+            m_toolInfo.name = m_localizedStrings.value("Name");
             Logger::instance().logInfo("ToolProxyInterface",
                 QString("Updated name to: %1").arg(m_toolInfo.name));
         }
-        if (locObj.contains("Description")) {
-            m_toolInfo.description = locObj.value("Description");
+        if (m_localizedStrings.contains("Description")) {
+            m_toolInfo.description = m_localizedStrings.value("Description");
             Logger::instance().logInfo("ToolProxyInterface",
                 QString("Updated description to: %1").arg(m_toolInfo.description));
         }
-    } else {
-        Logger::instance().logWarning("ToolProxyInterface",
-            QString("Failed to open localisation file: %1").arg(locPath));
+    }
+
+    if (!languageDidChange && !stringsDidChange && !gameLanguageDidChange && !gameLanguageNamesDidChange) {
+        Logger::instance().logInfo(
+            "ToolProxyInterface",
+            QString("Skipping duplicate language update for %1, code=%2")
+                .arg(m_toolInfo.id, m_currentLanguageCode)
+        );
+        return;
     }
 
     if (isProcessRunning()) {
         QJsonObject payload;
-        payload["language"] = langCode;
+        payload["language"] = m_currentLanguageCode;
+        payload["gameLanguage"] = m_currentGameLanguageCode;
+        payload["gameLanguageNames"] = m_currentGameLanguageNames;
+        payload["localizedStrings"] = QJsonObject::fromVariantMap(toVariantMap(m_localizedStrings));
+        Logger::instance().logInfo(
+            "ToolProxyInterface",
+            QString("Sending LoadLanguage to worker for %1, code=%2")
+                .arg(m_toolInfo.id, m_currentLanguageCode)
+        );
         sendMessage(ToolIpc::MessageType::LoadLanguage, payload);
+        Logger::instance().logInfo(
+            "ToolProxyInterface",
+            QString("Sent LoadLanguage to worker for %1, requesting state refresh")
+                .arg(m_toolInfo.id)
+        );
+        sendStateRequest(
+            ToolIpc::MessageType::StateQuery,
+            QJsonObject{{QStringLiteral("initial"), false}, {QStringLiteral("reason"), QStringLiteral("language_change")}},
+            QStringLiteral("language_change")
+        );
+        Logger::instance().logInfo(
+            "ToolProxyInterface",
+            QString("Queued language_change state request for %1")
+                .arg(m_toolInfo.id)
+        );
     }
 }
 
@@ -1000,6 +772,14 @@ void ToolProxyInterface::onNewConnection() {
 }
 
 void ToolProxyInterface::onSocketReadyRead() {
+    processAvailableMessages();
+}
+
+void ToolProxyInterface::processAvailableMessages() {
+    if (!m_socket) {
+        return;
+    }
+
     m_buffer.append(m_socket->readAll());
     
     while (m_buffer.size() >= 4) {
@@ -1026,36 +806,45 @@ void ToolProxyInterface::onSocketDisconnected() {
         return;
     }
 
-    Logger::instance().logWarning("ToolProxyInterface", "Tool process disconnected");
-    m_socket = nullptr;
-    m_processReady = false;
-    
-    // Check if process crashed
-    if (m_process && m_process->state() == QProcess::NotRunning) {
-        emit processCrashed("Tool process disconnected unexpectedly");
+    if (m_sessionUnavailable) {
+        Logger::instance().logWarning(
+            "ToolProxyInterface",
+            QString("Ignoring socket disconnect after unavailability for %1").arg(m_toolInfo.id)
+        );
+        m_socket = nullptr;
+        m_processReady = false;
+        return;
     }
+
+    const bool processStillRunning = m_process && m_process->state() != QProcess::NotRunning;
+    handleSessionUnavailable(QStringLiteral("Tool process disconnected unexpectedly."), processStillRunning);
 }
 
 void ToolProxyInterface::onProcessStarted() {
-    Logger::instance().logInfo("ToolProxyInterface", "Tool process started");
 }
 
 void ToolProxyInterface::onProcessFinished(int exitCode, QProcess::ExitStatus exitStatus) {
-    Logger::instance().logInfo("ToolProxyInterface", 
-        QString("Tool process finished with code %1, status %2").arg(exitCode).arg(exitStatus));
-    
     m_processReady = false;
 
     if (m_stopping) {
         Logger::instance().logInfo("ToolProxyInterface", "Process finished during shutdown");
         return;
     }
-    
-    if (exitStatus == QProcess::CrashExit) {
-        emit processCrashed(QString("Tool process crashed with exit code %1").arg(exitCode));
-    } else {
-        emit processStopped();
+
+    if (m_sessionUnavailable) {
+        Logger::instance().logWarning(
+            "ToolProxyInterface",
+            QString("Process finished after session was already marked unavailable for %1").arg(m_toolInfo.id)
+        );
+        return;
     }
+
+    if (exitStatus == QProcess::CrashExit) {
+        handleSessionUnavailable(QString("Tool process crashed with exit code %1").arg(exitCode));
+        return;
+    }
+
+    handleSessionUnavailable(QString("Tool process exited unexpectedly with exit code %1").arg(exitCode));
 }
 
 void ToolProxyInterface::onProcessError(QProcess::ProcessError error) {
@@ -1070,21 +859,35 @@ void ToolProxyInterface::onProcessError(QProcess::ProcessError error) {
     }
 
     if (m_stopping) {
-        Logger::instance().logInfo("ToolProxyInterface", "Ignoring process error during shutdown: " + errorStr);
+        Logger::instance().logInfo("ToolProxyInterface", QString("Ignoring process error during shutdown: tool=%1, error=%2").arg(m_toolInfo.name, errorStr));
         return;
     }
-    
-    Logger::instance().logError("ToolProxyInterface", "Process error: " + errorStr);
-    emit processCrashed(errorStr);
+
+    Logger::instance().logError("ToolProxyInterface", QString("Process error: tool=%1, error=%2, processState=%3")
+        .arg(m_toolInfo.name, errorStr)
+        .arg(m_process ? QString::number(m_process->state()) : "null"));
+    const bool terminateProcess = m_process && m_process->state() != QProcess::NotRunning;
+    handleSessionUnavailable(QString("Process error: %1").arg(errorStr), terminateProcess);
 }
 
 void ToolProxyInterface::onHeartbeatTimeout() {
-    Logger::instance().logWarning("ToolProxyInterface", "Heartbeat timeout - tool process may be unresponsive");
+    handleSessionUnavailable(QStringLiteral("Heartbeat timeout - tool process is unresponsive."), true);
 }
 
 void ToolProxyInterface::handleMessage(const ToolIpc::Message& msg) {
-    // Check if this is a response to a pending request
-    if (m_pendingRequests.contains(msg.requestId)) {
+    const bool isWorkerResponse =
+        msg.type == ToolIpc::MessageType::ToolInfoResponse ||
+        msg.type == ToolIpc::MessageType::UiActionResponse ||
+        msg.type == ToolIpc::MessageType::StateQueryResponse ||
+        msg.type == ToolIpc::MessageType::Error;
+
+    if (m_heartbeatTimeoutTimer && !m_sessionUnavailable && !m_stopping) {
+        m_heartbeatTimeoutTimer->start(ToolIpc::HEARTBEAT_TIMEOUT_MS);
+    }
+
+    // Only response messages may consume pending request callbacks.
+    // Tool-originated host data requests share the same IPC channel and may reuse request ids.
+    if (isWorkerResponse && m_pendingRequests.contains(msg.requestId)) {
         auto callback = m_pendingRequests.take(msg.requestId);
         callback(msg);
         return;
@@ -1093,7 +896,7 @@ void ToolProxyInterface::handleMessage(const ToolIpc::Message& msg) {
     switch (msg.type) {
     case ToolIpc::MessageType::Ready:
         {
-            // Tool process is ready
+            markSessionAvailable();
             m_processReady = true;
             
             // Update tool info from process
@@ -1109,6 +912,7 @@ void ToolProxyInterface::handleMessage(const ToolIpc::Message& msg) {
             }
             
             // Start heartbeat
+            stopHeartbeatTimers();
             m_heartbeatTimer = new QTimer(this);
             connect(m_heartbeatTimer, &QTimer::timeout, [this]() {
                 sendMessage(ToolIpc::MessageType::HeartbeatAck);
@@ -1117,9 +921,13 @@ void ToolProxyInterface::handleMessage(const ToolIpc::Message& msg) {
             m_heartbeatTimeoutTimer = new QTimer(this);
             m_heartbeatTimeoutTimer->setSingleShot(true);
             connect(m_heartbeatTimeoutTimer, &QTimer::timeout, this, &ToolProxyInterface::onHeartbeatTimeout);
+            m_heartbeatTimeoutTimer->start(ToolIpc::HEARTBEAT_TIMEOUT_MS);
             
             Logger::instance().logInfo("ToolProxyInterface", "Tool process ready: " + m_toolInfo.id);
             emit processStarted();
+            if (m_initialStateQueryPending) {
+                requestInitialStateAsync();
+            }
         }
         break;
         
@@ -1131,32 +939,67 @@ void ToolProxyInterface::handleMessage(const ToolIpc::Message& msg) {
             m_heartbeatTimeoutTimer->start(ToolIpc::HEARTBEAT_TIMEOUT_MS);
         }
         break;
+
+    case ToolIpc::MessageType::StateUpdate:
+        {
+            const QJsonObject stateObject = msg.payload.value(QStringLiteral("state")).toObject();
+            m_cachedStatePacket = parseStatePacket(stateObject);
+            int rowCount = 0;
+            for (const QVariant& modelValue : m_cachedStatePacket.listModels) {
+                const QVariantMap modelMap = modelValue.toMap();
+                if (modelMap.value(QStringLiteral("id")).toString() == QStringLiteral("file_list")) {
+                    rowCount = modelMap.value(QStringLiteral("rows")).toList().size();
+                    break;
+                }
+            }
+            Logger::instance().logInfo(
+                "ToolProxyInterface",
+                QString("[STATE_CHAIN] Received worker state update for %1: page=%2 listModels=%3 fileListRows=%4")
+                    .arg(m_toolInfo.id)
+                    .arg(m_cachedStatePacket.pageId)
+                    .arg(m_cachedStatePacket.listModels.size())
+                    .arg(rowCount)
+            );
+            emit statePacketUpdated(stateObject);
+        }
+        break;
         
     case ToolIpc::MessageType::GetConfig:
     case ToolIpc::MessageType::GetFileIndex:
-    case ToolIpc::MessageType::GetPluginBinaryPath:
+    case ToolIpc::MessageType::InvokePlugin:
+    case ToolIpc::MessageType::ReadMatchingTextFiles:
     case ToolIpc::MessageType::ReadBinaryFile:
     case ToolIpc::MessageType::ReadTextFile:
     case ToolIpc::MessageType::ReadEffectiveBinaryFile:
     case ToolIpc::MessageType::ReadEffectiveTextFile:
+    case ToolIpc::MessageType::ReadEffectiveTextFiles:
     case ToolIpc::MessageType::WriteBinaryFile:
     case ToolIpc::MessageType::WriteTextFile:
     case ToolIpc::MessageType::RemovePath:
     case ToolIpc::MessageType::EnsureDirectory:
     case ToolIpc::MessageType::ListDirectory:
+    case ToolIpc::MessageType::ListEffectiveFiles:
         // Handle data requests from tool
         handleDataRequest(msg);
         break;
         
+    case ToolIpc::MessageType::ToolInfoResponse:
+    case ToolIpc::MessageType::UiActionResponse:
+    case ToolIpc::MessageType::StateQueryResponse:
+    case ToolIpc::MessageType::Error:
+        Logger::instance().logWarning(
+            "ToolProxyInterface",
+            QString("Unexpected response message type: %1 (requestId=%2)")
+                .arg(static_cast<int>(msg.type))
+                .arg(msg.requestId)
+        );
+        break;
+
     default:
-        Logger::instance().logWarning("ToolProxyInterface", 
+        Logger::instance().logWarning("ToolProxyInterface",
             QString("Unhandled message type: %1").arg(static_cast<int>(msg.type)));
         break;
     }
-}
-
-bool ToolProxyInterface::isPluginDependencyAuthorized(const QString& pluginName) const {
-    return m_toolInfo.dependencies.contains(pluginName, Qt::CaseSensitive);
 }
 
 void ToolProxyInterface::sendMessage(ToolIpc::MessageType type, const QJsonObject& payload, quint32 requestId) {
@@ -1175,6 +1018,445 @@ void ToolProxyInterface::sendRequest(ToolIpc::MessageType type, const QJsonObjec
     sendMessage(type, payload, reqId);
 }
 
+bool ToolProxyInterface::isWorkerSessionReady() const {
+    return m_processReady
+        && !m_sessionUnavailable
+        && m_socket
+        && m_socket->state() == QLocalSocket::ConnectedState;
+}
+
+void ToolProxyInterface::stopHeartbeatTimers() {
+    if (m_heartbeatTimer) {
+        m_heartbeatTimer->stop();
+        delete m_heartbeatTimer;
+        m_heartbeatTimer = nullptr;
+    }
+
+    if (m_heartbeatTimeoutTimer) {
+        m_heartbeatTimeoutTimer->stop();
+        delete m_heartbeatTimeoutTimer;
+        m_heartbeatTimeoutTimer = nullptr;
+    }
+}
+
+void ToolProxyInterface::clearPendingRequests() {
+    m_pendingRequests.clear();
+}
+
+void ToolProxyInterface::markSessionAvailable() {
+    m_sessionUnavailable = false;
+    m_sessionUnavailableReason.clear();
+}
+
+void ToolProxyInterface::setCachedLifecycleState(const QString& status, const QString& message, bool notify) {
+    ToolUiStatePacket packet;
+    packet.pageId = QStringLiteral("tool_lifecycle");
+    packet.modeId = status;
+    packet.viewState.insert(QStringLiteral("lifecycleStatus"), status);
+    packet.viewState.insert(QStringLiteral("statusText"), message);
+    packet.viewState.insert(QStringLiteral("loadingActive"), status == QStringLiteral("starting"));
+    packet.viewState.insert(QStringLiteral("loadingText"), message);
+    packet.viewState.insert(QStringLiteral("lastError"), status == QStringLiteral("error") ? message : QString());
+    packet.runtimeVariables.insert(QStringLiteral("workerStatus"), status);
+    packet.topbarState.insert(QStringLiteral("visible"), false);
+    packet.sidebarState.insert(QStringLiteral("visible"), false);
+    m_cachedStatePacket = packet;
+
+    if (notify) {
+        emit statePacketUpdated(statePacketToJsonObject(m_cachedStatePacket));
+    }
+}
+
+void ToolProxyInterface::handleSessionUnavailable(const QString& reason, bool terminateProcess) {
+    if (m_stopping) {
+        return;
+    }
+
+    const QString effectiveReason = reason.trimmed().isEmpty()
+        ? QStringLiteral("Worker session is unavailable.")
+        : reason.trimmed();
+    const bool firstNotification = !m_sessionUnavailable;
+
+    if (m_sessionUnavailableReason.isEmpty()) {
+        m_sessionUnavailableReason = effectiveReason;
+    }
+    m_sessionUnavailable = true;
+    m_processReady = false;
+
+    Logger::instance().logError(
+        "ToolProxyInterface",
+        QString("Worker session unavailable for %1: %2").arg(m_toolInfo.id, m_sessionUnavailableReason)
+    );
+
+    clearPendingRequests();
+    stopHeartbeatTimers();
+    m_initialStateQueryPending = false;
+    setCachedLifecycleState(QStringLiteral("error"), m_sessionUnavailableReason, true);
+
+    if (m_socket) {
+        if (m_socket->state() != QLocalSocket::UnconnectedState) {
+            m_socket->abort();
+        }
+        m_socket = nullptr;
+    }
+
+    if (terminateProcess && m_process && m_process->state() != QProcess::NotRunning) {
+        Logger::instance().logWarning(
+            "ToolProxyInterface",
+            QString("Terminating unavailable worker process for %1").arg(m_toolInfo.id)
+        );
+        m_process->terminate();
+        QTimer::singleShot(250, this, [this]() {
+            if (m_process && m_process->state() != QProcess::NotRunning && m_sessionUnavailable && !m_stopping) {
+                Logger::instance().logWarning(
+                    "ToolProxyInterface",
+                    QString("Force killing unavailable worker process for %1").arg(m_toolInfo.id)
+                );
+                m_process->kill();
+            }
+        });
+    }
+
+    if (firstNotification) {
+        emit processCrashed(m_sessionUnavailableReason);
+    }
+}
+
+void ToolProxyInterface::requestInitialStateAsync() {
+    if (!isWorkerSessionReady()) {
+        m_initialStateQueryPending = true;
+        return;
+    }
+
+    m_initialStateQueryPending = false;
+    sendStateRequest(
+        ToolIpc::MessageType::StateQuery,
+        QJsonObject{{QStringLiteral("initial"), true}},
+        QStringLiteral("initial_state")
+    );
+}
+
+bool ToolProxyInterface::sendStateRequest(ToolIpc::MessageType type,
+                                          const QJsonObject& payload,
+                                          const QString& reason) {
+    if (!isWorkerSessionReady()) {
+        if (!m_sessionUnavailable) {
+            Logger::instance().logWarning(
+                "ToolProxyInterface",
+                QString("Cannot send worker state request for %1 because the session is not ready.")
+                    .arg(m_toolInfo.id)
+            );
+        }
+        return false;
+    }
+
+    const quint32 requestId = nextRequestId();
+    const QString requestReason = reason.trimmed().isEmpty()
+        ? QStringLiteral("state_request")
+        : reason.trimmed();
+
+    m_pendingRequests.insert(requestId, [this, type, requestId, requestReason](const ToolIpc::Message& response) {
+        const bool success = response.payload.value(QStringLiteral("success")).toBool(false);
+        const QString errorText = response.payload.value(QStringLiteral("error")).toString();
+        const QJsonObject stateObject = response.payload.value(QStringLiteral("state")).toObject();
+
+        if (!success || stateObject.isEmpty()) {
+            Logger::instance().logWarning(
+                "ToolProxyInterface",
+                QString("Worker async state request failed for %1 (type=%2, requestId=%3, reason=%4): %5")
+                    .arg(m_toolInfo.id)
+                    .arg(static_cast<int>(type))
+                    .arg(requestId)
+                    .arg(requestReason, errorText)
+            );
+            return;
+        }
+
+        m_cachedStatePacket = parseStatePacket(stateObject);
+        Logger::instance().logInfo(
+            "ToolProxyInterface",
+            QString("[STATE_CHAIN] Worker async state request succeeded for %1 (type=%2, requestId=%3, reason=%4): page=%5 listModels=%6")
+                .arg(m_toolInfo.id)
+                .arg(static_cast<int>(type))
+                .arg(requestId)
+                .arg(requestReason)
+                .arg(m_cachedStatePacket.pageId)
+                .arg(m_cachedStatePacket.listModels.size())
+        );
+        emit statePacketUpdated(stateObject);
+    });
+
+    Logger::instance().logInfo(
+        "ToolProxyInterface",
+        QString("Sending worker state request for %1 (type=%2, requestId=%3, reason=%4)")
+            .arg(m_toolInfo.id)
+            .arg(static_cast<int>(type))
+            .arg(requestId)
+            .arg(requestReason)
+    );
+    sendMessage(type, payload, requestId);
+
+    const bool isUiStateRequest =
+        type == ToolIpc::MessageType::StateQuery || type == ToolIpc::MessageType::UiAction;
+    const int timeoutMs = isUiStateRequest ? 120000 : ToolIpc::PROCESS_START_TIMEOUT_MS;
+    QTimer::singleShot(timeoutMs, this, [this, requestId, type, requestReason]() {
+        if (!m_pendingRequests.contains(requestId)) {
+            return;
+        }
+
+        m_pendingRequests.remove(requestId);
+        if (m_stopping || m_sessionUnavailable) {
+            return;
+        }
+
+        handleSessionUnavailable(
+            QString("Timed out while waiting for worker response (type=%1, requestId=%2, reason=%3).")
+                .arg(static_cast<int>(type))
+                .arg(requestId)
+                .arg(requestReason),
+            true
+        );
+    });
+
+    return true;
+}
+
+ToolUiStatePacket ToolProxyInterface::parseStatePacket(const QJsonObject& jsonObject) {
+    ToolUiStatePacket packet;
+
+    if (jsonObject.contains("pageId")) {
+        const QVariantMap variantMap = QJsonDocument(jsonObject).toVariant().toMap();
+        packet.pageId = variantMap.value("pageId").toString();
+        packet.modeId = variantMap.value("modeId").toString();
+        packet.viewState = variantMap.value("viewState").toMap();
+        packet.sidebarState = variantMap.value("sidebarState").toMap();
+        packet.topbarState = variantMap.value("topbarState").toMap();
+        packet.runtimeVariables = variantMap.value("runtimeVariables").toMap();
+        packet.listModels = variantMap.value("listModels").toList();
+        packet.patches = variantMap.value("patches").toList();
+        return packet;
+    }
+
+    packet.pageId = QStringLiteral("error_log");
+    packet.modeId = QStringLiteral("default");
+
+    packet.topbarState.insert("visible", true);
+    packet.topbarState.insert("currentPageId", QStringLiteral("error_log"));
+    packet.topbarState.insert("pageOrder", QStringList{QStringLiteral("error_log")});
+    packet.topbarState.insert(
+        "activeFunction",
+        jsonObject.value("sortMode").toInt() == 1 ? QStringLiteral("error_log::sort_category")
+                                                  : QStringLiteral("error_log::sort_time")
+    );
+
+    packet.sidebarState.insert("visible", true);
+    packet.sidebarState.insert("title", QStringLiteral("Log Files"));
+    packet.sidebarState.insert("activeMode", QStringLiteral("default"));
+    packet.sidebarState.insert("modeOrder", QStringList{QStringLiteral("default")});
+    packet.sidebarState.insert("searchEnabled", false);
+    packet.sidebarState.insert("selectAllEnabled", false);
+
+    packet.viewState.insert("currentFile", jsonObject.value("currentFile").toString());
+    packet.viewState.insert("compareFile", jsonObject.value("compareFile").toString());
+    packet.viewState.insert("searchText", jsonObject.value("searchText").toString());
+    packet.viewState.insert("sortMode", jsonObject.value("sortMode").toInt());
+    packet.viewState.insert("isCompareMode", jsonObject.value("isCompareMode").toBool());
+    packet.viewState.insert("hasCurrentFile", jsonObject.value("hasCurrentFile").toBool());
+
+    auto buildPreviewText = [](QString text) {
+        text.replace("\r\n", "\n");
+        text.replace('\r', '\n');
+        text = text.simplified();
+        if (text.length() > 180) {
+            text = text.left(180) + QStringLiteral("...");
+        }
+        return text;
+    };
+
+    auto formatClipboardEntry = [](const QJsonObject& entryObject) {
+        return QStringLiteral("[%1][%2][%3]: %4")
+            .arg(entryObject.value("systemTime").toString(),
+                 entryObject.value("gameTime").toString(),
+                 entryObject.value("category").toString(),
+                 entryObject.value("message").toString());
+    };
+
+    auto displayNameForFile = [](const QJsonObject& fileObject) {
+        if (fileObject.value("isLatest").toBool()) {
+            return QStringLiteral("Latest");
+        }
+        return fileObject.value("displayName").toString();
+    };
+
+    QVariantMap sidebarModel;
+    sidebarModel.insert("id", QStringLiteral("logManager.files"));
+    sidebarModel.insert("title", QStringLiteral("Log Files"));
+    sidebarModel.insert("headerHidden", true);
+    sidebarModel.insert("listSearch", true);
+    sidebarModel.insert("selectAll", false);
+
+    QVariantList sidebarColumns;
+    QVariantMap sidebarColumn;
+    sidebarColumn.insert("id", QStringLiteral("text"));
+    sidebarColumn.insert("title", QStringLiteral("Log Files"));
+    sidebarColumn.insert("stretch", 1);
+    sidebarColumns.append(sidebarColumn);
+    sidebarModel.insert("columns", sidebarColumns);
+
+    QVariantList sidebarRows;
+    const QJsonArray files = jsonObject.value("files").toArray();
+    for (const QJsonValue& value : files) {
+        const QJsonObject fileObject = value.toObject();
+        QVariantMap row;
+        row.insert("rowId", fileObject.value("displayName").toString());
+
+        QVariantMap rowValues;
+        rowValues.insert("text", displayNameForFile(fileObject));
+        row.insert("values", rowValues);
+
+        const QString displayName = fileObject.value("displayName").toString();
+        const bool isCurrent = displayName == jsonObject.value("currentFile").toString();
+        const bool isCompare = displayName == jsonObject.value("compareFile").toString();
+
+        QVariantMap rowState;
+        rowState.insert("isLatest", fileObject.value("isLatest").toBool());
+        rowState.insert("isLoaded", fileObject.value("isLoaded").toBool());
+        rowState.insert("isCurrent", isCurrent);
+        rowState.insert("isCompare", isCompare);
+        rowState.insert("selected", isCurrent);
+        rowState.insert("canCompare", !isCurrent && !isCompare);
+        rowState.insert("canStopCompare", isCompare);
+        row.insert("state", rowState);
+        sidebarRows.append(row);
+    }
+    sidebarModel.insert("rows", sidebarRows);
+    packet.listModels.append(sidebarModel);
+
+    QVariantMap mainModel;
+    mainModel.insert("id", QStringLiteral("log_entries_list"));
+    mainModel.insert("title", jsonObject.value("isCompareMode").toBool() ? QStringLiteral("Compare Mode") : QStringLiteral("Error Log"));
+    mainModel.insert("headerHidden", false);
+    mainModel.insert("listSearch", false);
+    mainModel.insert("selectAll", false);
+
+    QVariantList mainColumns;
+    if (jsonObject.value("isCompareMode").toBool()) {
+        QString currentDisplayName = jsonObject.value("currentFile").toString();
+        QString compareDisplayName = jsonObject.value("compareFile").toString();
+        for (const QJsonValue& fileValue : files) {
+            const QJsonObject fileObject = fileValue.toObject();
+            const QString displayName = fileObject.value("displayName").toString();
+            if (displayName == currentDisplayName) {
+                currentDisplayName = displayNameForFile(fileObject);
+            }
+            if (displayName == compareDisplayName) {
+                compareDisplayName = displayNameForFile(fileObject);
+            }
+        }
+
+        packet.viewState.insert("log_entries_title", QStringLiteral("Compare Mode: %1 ↔ %2").arg(currentDisplayName, compareDisplayName));
+
+        QVariantMap leftColumn;
+        leftColumn.insert("id", QStringLiteral("left"));
+        leftColumn.insert("title", currentDisplayName);
+        leftColumn.insert("stretch", 2);
+        mainColumns.append(leftColumn);
+
+        QVariantMap rightColumn;
+        rightColumn.insert("id", QStringLiteral("right"));
+        rightColumn.insert("title", compareDisplayName);
+        rightColumn.insert("stretch", 2);
+        mainColumns.append(rightColumn);
+
+        QVariantMap categoryColumn;
+        categoryColumn.insert("id", QStringLiteral("category"));
+        categoryColumn.insert("title", QStringLiteral("Category"));
+        categoryColumn.insert("stretch", 1);
+        mainColumns.append(categoryColumn);
+
+        QVariantList rows;
+        const QJsonArray compareRows = jsonObject.value("compareRows").toArray();
+        for (const QJsonValue& value : compareRows) {
+            const QJsonObject rowObject = value.toObject();
+            const QJsonObject leftEntry = rowObject.value("leftEntry").toObject();
+            const QJsonObject rightEntry = rowObject.value("rightEntry").toObject();
+
+            auto buildCompareCell = [&](const QJsonObject& entryObject, bool hasEntry) {
+                if (!hasEntry) {
+                    return QString();
+                }
+                return buildPreviewText(
+                    entryObject.value("systemTime").toString() + QStringLiteral("\n") +
+                    entryObject.value("gameTime").toString() + QStringLiteral("\n") +
+                    entryObject.value("message").toString()
+                );
+            };
+
+            QVariantMap row;
+            row.insert("rowId", rowObject.value("normalizedKey").toString());
+
+            QVariantMap values;
+            values.insert("left", buildCompareCell(leftEntry, rowObject.value("hasLeft").toBool()));
+            values.insert("right", buildCompareCell(rightEntry, rowObject.value("hasRight").toBool()));
+            values.insert("category", rowObject.value("category").toString());
+            row.insert("values", values);
+
+            QVariantMap state;
+            state.insert("isHighPriority", rowObject.value("isHighPriority").toBool());
+            state.insert("hasLeft", rowObject.value("hasLeft").toBool());
+            state.insert("hasRight", rowObject.value("hasRight").toBool());
+            state.insert("leftMissing", !rowObject.value("hasLeft").toBool());
+            state.insert("rightMissing", !rowObject.value("hasRight").toBool());
+            state.insert("leftTooltip", formatClipboardEntry(leftEntry));
+            state.insert("rightTooltip", formatClipboardEntry(rightEntry));
+            row.insert("state", state);
+            rows.append(row);
+        }
+        mainModel.insert("rows", rows);
+    } else {
+        packet.viewState.insert("log_entries_title", QStringLiteral("Error Log"));
+
+        const auto addColumn = [&](const QString& id, const QString& title, int stretch) {
+            QVariantMap column;
+            column.insert("id", id);
+            column.insert("title", title);
+            column.insert("stretch", stretch);
+            mainColumns.append(column);
+        };
+
+        addColumn(QStringLiteral("systemTime"), QStringLiteral("Time"), 1);
+        addColumn(QStringLiteral("gameTime"), QStringLiteral("Date"), 1);
+        addColumn(QStringLiteral("category"), QStringLiteral("Category"), 1);
+        addColumn(QStringLiteral("message"), QStringLiteral("Message Preview"), 3);
+
+        QVariantList rows;
+        const QJsonArray entries = jsonObject.value("entries").toArray();
+        for (const QJsonValue& value : entries) {
+            const QJsonObject entryObject = value.toObject();
+            QVariantMap row;
+            row.insert("rowId", entryObject.value("normalizedKey").toString());
+
+            QVariantMap values;
+            values.insert("systemTime", entryObject.value("systemTime").toString());
+            values.insert("gameTime", entryObject.value("gameTime").toString());
+            values.insert("category", entryObject.value("category").toString());
+            values.insert("message", buildPreviewText(entryObject.value("message").toString()));
+            row.insert("values", values);
+
+            QVariantMap state;
+            state.insert("isHighPriority", entryObject.value("isHighPriority").toBool());
+            state.insert("tooltip", formatClipboardEntry(entryObject));
+            row.insert("state", state);
+            rows.append(row);
+        }
+        mainModel.insert("rows", rows);
+    }
+
+    mainModel.insert("columns", mainColumns);
+    packet.listModels.append(mainModel);
+    return packet;
+}
+
 void ToolProxyInterface::handleDataRequest(const ToolIpc::Message& msg) {
     QJsonObject payload;
     
@@ -1191,51 +1473,57 @@ void ToolProxyInterface::handleDataRequest(const ToolIpc::Message& msg) {
         Logger::instance().logInfo("ToolProxyInterface", "Sent file index data to tool process");
         break;
 
-    case ToolIpc::MessageType::GetPluginBinaryPath:
+    case ToolIpc::MessageType::InvokePlugin:
         {
             const QString pluginName = msg.payload.value("pluginName").toString().trimmed();
+            const QString operation = msg.payload.value("operation").toString().trimmed();
+            const quint32 contentType = static_cast<quint32>(msg.payload.value("contentType").toInt());
+            const quint32 flags = static_cast<quint32>(msg.payload.value("flags").toInt());
+            const QByteArray payloadBytes = QByteArray::fromBase64(msg.payload.value("payloadBase64").toString().toLatin1());
+
             payload["pluginName"] = pluginName;
+            payload["operation"] = operation;
 
-            if (pluginName.isEmpty()) {
-                payload["success"] = false;
-                payload["error"] = "Plugin name is empty.";
-                sendMessage(ToolIpc::MessageType::PluginBinaryPathResponse, payload, msg.requestId);
-                Logger::instance().logWarning("ToolProxyInterface", "Rejected plugin binary path request with empty plugin name");
-                break;
+            PluginAbiBroker::Request brokerRequest;
+            brokerRequest.pluginName = pluginName;
+            brokerRequest.operation = operation;
+            brokerRequest.contentType = static_cast<PluginAbiBroker::ContentType>(contentType);
+            brokerRequest.payload = payloadBytes;
+            brokerRequest.flags = flags;
+            brokerRequest.authorizedDependencies = m_toolInfo.dependencies;
+
+            const PluginAbiBroker::Response brokerResponse = PluginAbiBroker::instance().invoke(brokerRequest);
+            payload["success"] = brokerResponse.success;
+            payload["status"] = static_cast<int>(brokerResponse.status);
+            payload["contentType"] = static_cast<int>(brokerResponse.contentType);
+            payload["flags"] = static_cast<int>(brokerResponse.flags);
+            payload["payloadBase64"] = QString::fromLatin1(brokerResponse.payload.toBase64());
+            payload["error"] = brokerResponse.errorMessage;
+            sendMessage(ToolIpc::MessageType::InvokePluginResponse, payload, msg.requestId);
+        }
+        break;
+
+    case ToolIpc::MessageType::ReadMatchingTextFiles:
+        {
+            const ToolRuntimeContext::FileRoot root = parseFileRootFromPayload(msg.payload);
+            const QString relativePath = msg.payload.value("relativePath").toString();
+            const QString regexPattern = msg.payload.value("regexPattern").toString();
+            const bool recursive = msg.payload.value("recursive").toBool(false);
+            payload["root"] = ToolRuntimeContext::fileRootToString(root);
+            payload["relativePath"] = relativePath;
+            payload["regexPattern"] = regexPattern;
+            payload["recursive"] = recursive;
+
+            const ToolRuntimeContext::MatchingTextFilesResult result =
+                ToolRuntimeContext::instance().readMatchingTextFiles(root, relativePath, regexPattern, recursive);
+            payload["success"] = result.success;
+            if (result.success) {
+                payload["entries"] = makeMatchingTextFileEntriesJson(result.entries);
+            } else {
+                payload["error"] = result.errorMessage;
             }
 
-            if (!isPluginDependencyAuthorized(pluginName)) {
-                payload["success"] = false;
-                payload["error"] = QString("Plugin %1 is not declared in tool dependencies.").arg(pluginName);
-                sendMessage(ToolIpc::MessageType::PluginBinaryPathResponse, payload, msg.requestId);
-                Logger::instance().logWarning(
-                    "ToolProxyInterface",
-                    QString("Rejected unauthorized plugin request from tool %1 for plugin %2").arg(m_toolInfo.id, pluginName)
-                );
-                break;
-            }
-
-            QString libraryPath;
-            QString errorMessage;
-            if (!PluginManager::instance().getPluginBinaryPath(pluginName, &libraryPath, &errorMessage)) {
-                payload["success"] = false;
-                payload["error"] = errorMessage;
-                sendMessage(ToolIpc::MessageType::PluginBinaryPathResponse, payload, msg.requestId);
-                Logger::instance().logWarning(
-                    "ToolProxyInterface",
-                    QString("Failed authorized plugin request from tool %1 for plugin %2: %3")
-                        .arg(m_toolInfo.id, pluginName, errorMessage)
-                );
-                break;
-            }
-
-            payload["success"] = true;
-            payload["libraryPath"] = libraryPath;
-            sendMessage(ToolIpc::MessageType::PluginBinaryPathResponse, payload, msg.requestId);
-            Logger::instance().logInfo(
-                "ToolProxyInterface",
-                QString("Granted plugin binary path to tool %1 for plugin %2").arg(m_toolInfo.id, pluginName)
-            );
+            sendMessage(ToolIpc::MessageType::ReadMatchingTextFilesResponse, payload, msg.requestId);
         }
         break;
 
@@ -1304,6 +1592,26 @@ void ToolProxyInterface::handleDataRequest(const ToolIpc::Message& msg) {
             }
 
             sendMessage(ToolIpc::MessageType::ReadEffectiveTextFileResponse, payload, msg.requestId);
+        }
+        break;
+
+    case ToolIpc::MessageType::ReadEffectiveTextFiles:
+        {
+            const QString relativeRoot = msg.payload.value(QStringLiteral("relativeRoot")).toString();
+            const QString suffixFilter = msg.payload.value(QStringLiteral("suffixFilter")).toString();
+            payload["relativeRoot"] = relativeRoot;
+            payload["suffixFilter"] = suffixFilter;
+
+            const ToolRuntimeContext::MatchingTextFilesResult result =
+                ToolRuntimeContext::instance().readEffectiveTextFiles(relativeRoot, suffixFilter);
+            payload["success"] = result.success;
+            if (result.success) {
+                payload["entries"] = makeMatchingTextFileEntriesJson(result.entries);
+            } else {
+                payload["error"] = result.errorMessage;
+            }
+
+            sendMessage(ToolIpc::MessageType::ReadEffectiveTextFilesResponse, payload, msg.requestId);
         }
         break;
 
@@ -1408,8 +1716,96 @@ void ToolProxyInterface::handleDataRequest(const ToolIpc::Message& msg) {
             sendMessage(ToolIpc::MessageType::ListDirectoryResponse, payload, msg.requestId);
         }
         break;
+
+    case ToolIpc::MessageType::ListEffectiveFiles:
+        {
+            const QString relativeRoot = msg.payload.value(QStringLiteral("relativeRoot")).toString();
+            const QString suffixFilter = msg.payload.value(QStringLiteral("suffixFilter")).toString();
+            const ToolRuntimeContext::EffectiveFileListResult result =
+                ToolRuntimeContext::instance().listEffectiveFiles(relativeRoot, suffixFilter);
+            payload["success"] = result.success;
+            if (result.success) {
+                payload["entries"] = makeEffectiveFileEntriesJson(result.entries);
+            } else {
+                payload["error"] = result.errorMessage;
+            }
+
+            sendMessage(ToolIpc::MessageType::ListEffectiveFilesResponse, payload, msg.requestId);
+        }
+        break;
         
     default:
         break;
     }
+}
+
+// ============================================================================
+// Scripted UI Resources (New Architecture)
+// ============================================================================
+
+ToolGuiResourceDescriptor ToolProxyInterface::guiResourceDescriptor() const {
+    ToolGuiResourceDescriptor descriptor;
+    descriptor.presetFile = m_metaData.value("guiPreset").toString();
+    return descriptor;
+}
+
+ToolWorkerDescriptor ToolProxyInterface::workerDescriptor() const {
+    ToolWorkerDescriptor descriptor;
+    descriptor.workerId = m_metaData.value("workerId").toString();
+    if (descriptor.workerId.isEmpty()) {
+        descriptor.workerId = m_toolInfo.id;
+    }
+    return descriptor;
+}
+
+// ============================================================================
+// Worker Session Lifecycle (New Architecture)
+// ============================================================================
+
+void ToolProxyInterface::initializeWorkerSession() {
+    if (!m_infoLoaded) {
+        preloadInfo();
+    }
+
+    Logger::instance().logInfo(
+        "ToolProxyInterface",
+        QString("Initializing worker session for %1").arg(m_toolInfo.id)
+    );
+
+    setCachedLifecycleState(
+        QStringLiteral("starting"),
+        QStringLiteral("Starting worker process..."),
+        true
+    );
+
+    if (!isProcessRunning() && !startProcess()) {
+        handleSessionUnavailable(QStringLiteral("Failed to start worker process."));
+        return;
+    }
+
+    m_initialStateQueryPending = true;
+    if (isWorkerSessionReady()) {
+        requestInitialStateAsync();
+    }
+}
+
+ToolUiStatePacket ToolProxyInterface::initialUiState() const {
+    return m_cachedStatePacket;
+}
+
+ToolUiStatePacket ToolProxyInterface::handleUiAction(const ToolUiActionRequest& request) {
+    QJsonObject payload;
+    payload["actionType"] = request.actionType;
+    payload["targetId"] = request.targetId;
+    payload["arguments"] = QJsonObject::fromVariantMap(request.arguments);
+
+    if (!sendStateRequest(
+        ToolIpc::MessageType::UiAction,
+        payload,
+        QStringLiteral("ui_action")
+    )) {
+        Logger::instance().logWarning("ToolProxyInterface", "Worker UI action was not sent because the session is unavailable.");
+    }
+
+    return m_cachedStatePacket;
 }

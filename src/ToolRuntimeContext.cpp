@@ -13,19 +13,34 @@ ToolRuntimeContext& ToolRuntimeContext::instance() {
     return instance;
 }
 
-void ToolRuntimeContext::setPluginBinaryPathResolver(PluginBinaryPathResolver resolver) {
-    m_pluginBinaryPathResolver = std::move(resolver);
+void ToolRuntimeContext::setPluginInvoker(PluginInvoker invoker) {
+    m_pluginInvoker = std::move(invoker);
 }
 
-bool ToolRuntimeContext::requestAuthorizedPluginBinaryPath(const QString& pluginName, QString* outPath, QString* errorMessage) const {
-    if (!m_pluginBinaryPathResolver) {
-        if (errorMessage) {
-            *errorMessage = "Plugin runtime context resolver is not available.";
-        }
-        return false;
+ToolRuntimeContext::PluginInvokeResponse ToolRuntimeContext::invokePlugin(const PluginInvokeRequest& request) const {
+    if (!m_pluginInvoker) {
+        PluginInvokeResponse response;
+        response.status = 5;
+        response.errorMessage = "Plugin invoker is not available.";
+        return response;
     }
 
-    return m_pluginBinaryPathResolver(pluginName, outPath, errorMessage);
+    return m_pluginInvoker(request);
+}
+
+void ToolRuntimeContext::setMatchingTextFileReader(MatchingTextFileReader reader) {
+    m_matchingTextFileReader = std::move(reader);
+}
+
+ToolRuntimeContext::MatchingTextFilesResult ToolRuntimeContext::readMatchingTextFiles(FileRoot root,
+                                                                                     const QString& relativePath,
+                                                                                     const QString& regexPattern,
+                                                                                     bool recursive) const {
+    if (!m_matchingTextFileReader) {
+        return {false, {}, "Matching text file reader is not available."};
+    }
+
+    return m_matchingTextFileReader(root, relativePath, regexPattern, recursive);
 }
 
 void ToolRuntimeContext::setBinaryFileReader(BinaryFileReader reader) {
@@ -74,6 +89,32 @@ ToolRuntimeContext::TextReadResult ToolRuntimeContext::readEffectiveTextFile(con
     }
 
     return m_effectiveTextFileReader(relativePath);
+}
+
+void ToolRuntimeContext::setEffectiveFileEnumerator(EffectiveFileEnumerator enumerator) {
+    m_effectiveFileEnumerator = std::move(enumerator);
+}
+
+ToolRuntimeContext::EffectiveFileListResult ToolRuntimeContext::listEffectiveFiles(const QString& relativeRoot,
+                                                                                   const QString& suffixFilter) const {
+    if (!m_effectiveFileEnumerator) {
+        return {false, {}, "Effective file enumerator is not available."};
+    }
+
+    return m_effectiveFileEnumerator(relativeRoot, suffixFilter);
+}
+
+void ToolRuntimeContext::setEffectiveTextFilesReader(EffectiveTextFilesReader reader) {
+    m_effectiveTextFilesReader = std::move(reader);
+}
+
+ToolRuntimeContext::MatchingTextFilesResult ToolRuntimeContext::readEffectiveTextFiles(const QString& relativeRoot,
+                                                                                       const QString& suffixFilter) const {
+    if (!m_effectiveTextFilesReader) {
+        return {false, {}, "Effective text files reader is not available."};
+    }
+
+    return m_effectiveTextFilesReader(relativeRoot, suffixFilter);
 }
 
 void ToolRuntimeContext::setBinaryFileWriter(BinaryFileWriter writer) {
@@ -160,4 +201,30 @@ ToolRuntimeContext::FileRoot ToolRuntimeContext::fileRootFromString(const QStrin
         return FileRoot::Doc;
     }
     return FileRoot::Unknown;
+}
+
+QString ToolRuntimeContext::effectiveFileSourceToString(EffectiveFileSource source) {
+    switch (source) {
+    case EffectiveFileSource::Game:
+        return "Game";
+    case EffectiveFileSource::Mod:
+        return "Mod";
+    case EffectiveFileSource::Dlc:
+        return "DLC";
+    default:
+        return "Unknown";
+    }
+}
+
+ToolRuntimeContext::EffectiveFileSource ToolRuntimeContext::effectiveFileSourceFromString(const QString& value) {
+    if (value.compare("Game", Qt::CaseInsensitive) == 0) {
+        return EffectiveFileSource::Game;
+    }
+    if (value.compare("Mod", Qt::CaseInsensitive) == 0) {
+        return EffectiveFileSource::Mod;
+    }
+    if (value.compare("DLC", Qt::CaseInsensitive) == 0) {
+        return EffectiveFileSource::Dlc;
+    }
+    return EffectiveFileSource::Unknown;
 }

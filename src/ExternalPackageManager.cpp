@@ -10,6 +10,7 @@
 
 #include "CustomMessageBox.h"
 #include "LocalizationManager.h"
+#include "PackageRegistry.h"
 #include "PluginDescriptorParser.h"
 #include "ToolDescriptorParser.h"
 
@@ -25,6 +26,9 @@
 
 namespace {
 QString normalizePath(const QString& path) {
+    if (path.trimmed().isEmpty()) {
+        return QString();
+    }
     return QDir::cleanPath(QFileInfo(path).absoluteFilePath());
 }
 
@@ -35,6 +39,16 @@ bool hasImageFile(const QString& directoryPath) {
         QDir::Files
     );
     return !imageFiles.isEmpty();
+}
+
+QString runtimeLibraryExtension() {
+#if defined(Q_OS_WIN)
+    return QStringLiteral(".dll");
+#elif defined(Q_OS_MACOS) || defined(Q_OS_MAC)
+    return QStringLiteral(".dylib");
+#else
+    return QStringLiteral(".so");
+#endif
 }
 }
 
@@ -186,19 +200,34 @@ ExternalPackageManager::ImportResult ExternalPackageManager::importToolPackage(c
         return result;
     }
 
-    const QString toolName = metaData.value("id").toString().trimmed();
-    if (toolName.isEmpty()) {
+    const QString toolId = metaData.value("id").toString().trimmed();
+    const QString toolName = metaData.value("name").toString().trimmed();
+    if (toolId.isEmpty() || toolName.isEmpty()) {
         result.errorMessage = loc.getString("ExternalPackage", "ToolDescriptorMissingName");
         return result;
     }
 
-    const QString installedDescriptorPath = buildInstalledToolDescriptorPath(toolName);
-    result.importedId = toolName;
+    if (!PackageRegistry::isValidPackageId(PackageKind::Tool, toolId)) {
+        result.errorMessage = loc.getString("ExternalPackage", "ToolDescriptorInvalidId").arg(toolId);
+        return result;
+    }
+
+    const QString installedDescriptorPath = buildInstalledToolDescriptorPath(toolId);
+    result.importedId = toolId;
     result.importedName = toolName;
     result.installedDescriptorPath = installedDescriptorPath;
     result.targetDirectoryPath = QFileInfo(installedDescriptorPath).dir().absolutePath();
 
     if (isSamePath(normalizedDescriptorPath, installedDescriptorPath)) {
+        RegisteredPackage package;
+        package.id = toolId;
+        package.name = toolName;
+        package.version = metaData.value("version").toString().trimmed();
+        package.directoryPath = QFileInfo(installedDescriptorPath).dir().absolutePath();
+        package.descriptorPath = installedDescriptorPath;
+        package.official = PackageRegistry::isPackageOfficial(PackageKind::Tool, toolId);
+        PackageRegistry::registerPackage(PackageKind::Tool, package);
+
         result.success = true;
         result.alreadyInstalled = true;
         result.useInstalledCopy = true;
@@ -211,7 +240,7 @@ ExternalPackageManager::ImportResult ExternalPackageManager::importToolPackage(c
         return result;
     }
 
-    const QString targetDirectoryPath = QDir(targetRootPath).filePath(toolName);
+    const QString targetDirectoryPath = QDir(targetRootPath).filePath(toolId);
     result.targetDirectoryPath = targetDirectoryPath;
 
     if (QDir(targetDirectoryPath).exists()) {
@@ -248,6 +277,18 @@ ExternalPackageManager::ImportResult ExternalPackageManager::importToolPackage(c
         return result;
     }
 
+    RegisteredPackage package;
+    package.id = toolId;
+    package.name = toolName;
+    package.version = metaData.value("version").toString().trimmed();
+    package.directoryPath = targetDirectoryPath;
+    package.descriptorPath = QDir(targetDirectoryPath).filePath("descriptor.apehts");
+    package.official = false;
+    if (!PackageRegistry::registerPackage(PackageKind::Tool, package, &errorMessage)) {
+        result.errorMessage = errorMessage;
+        return result;
+    }
+
     result.success = true;
     return result;
 }
@@ -274,13 +315,27 @@ ExternalPackageManager::ImportResult ExternalPackageManager::importPluginPackage
         return result;
     }
 
-    const QString installedDescriptorPath = buildInstalledPluginDescriptorPath(info.name);
+    if (!PackageRegistry::isValidPackageId(PackageKind::Plugin, info.id)) {
+        result.errorMessage = loc.getString("ExternalPackage", "PluginDescriptorInvalidId").arg(info.id);
+        return result;
+    }
+
+    const QString installedDescriptorPath = buildInstalledPluginDescriptorPath(info.id);
     result.importedId = info.id;
     result.importedName = info.name;
     result.installedDescriptorPath = installedDescriptorPath;
     result.targetDirectoryPath = QFileInfo(installedDescriptorPath).dir().absolutePath();
 
     if (isSamePath(normalizedDescriptorPath, installedDescriptorPath)) {
+        RegisteredPackage package;
+        package.id = info.id;
+        package.name = info.name;
+        package.version = info.version;
+        package.directoryPath = QFileInfo(installedDescriptorPath).dir().absolutePath();
+        package.descriptorPath = installedDescriptorPath;
+        package.official = PackageRegistry::isPackageOfficial(PackageKind::Plugin, info.id);
+        PackageRegistry::registerPackage(PackageKind::Plugin, package);
+
         result.success = true;
         result.alreadyInstalled = true;
         result.useInstalledCopy = true;
@@ -293,7 +348,7 @@ ExternalPackageManager::ImportResult ExternalPackageManager::importPluginPackage
         return result;
     }
 
-    const QString targetDirectoryPath = QDir(targetRootPath).filePath(info.name);
+    const QString targetDirectoryPath = QDir(targetRootPath).filePath(info.id);
     result.targetDirectoryPath = targetDirectoryPath;
 
     if (QDir(targetDirectoryPath).exists()) {
@@ -324,6 +379,18 @@ ExternalPackageManager::ImportResult ExternalPackageManager::importPluginPackage
     }
 
     if (!copyDirectoryRecursively(sourceDirPath, targetDirectoryPath, &errorMessage)) {
+        result.errorMessage = errorMessage;
+        return result;
+    }
+
+    RegisteredPackage package;
+    package.id = info.id;
+    package.name = info.name;
+    package.version = info.version;
+    package.directoryPath = targetDirectoryPath;
+    package.descriptorPath = QDir(targetDirectoryPath).filePath("descriptor.htsplugin");
+    package.official = false;
+    if (!PackageRegistry::registerPackage(PackageKind::Plugin, package, &errorMessage)) {
         result.errorMessage = errorMessage;
         return result;
     }
@@ -369,12 +436,20 @@ QString ExternalPackageManager::appPluginsRootPath() {
     return findAppManagedRoot("plugins");
 }
 
-QString ExternalPackageManager::buildInstalledToolDescriptorPath(const QString& toolName) {
-    return QDir(appToolsRootPath()).filePath(toolName + "/descriptor.apehts");
+bool ExternalPackageManager::removeInstalledToolPackage(const QString& toolId, QString* errorMessage) {
+    return PackageRegistry::removeInstalledPackage(PackageKind::Tool, toolId, errorMessage);
 }
 
-QString ExternalPackageManager::buildInstalledPluginDescriptorPath(const QString& pluginName) {
-    return QDir(appPluginsRootPath()).filePath(pluginName + "/descriptor.htsplugin");
+bool ExternalPackageManager::removeInstalledPluginPackage(const QString& pluginId, QString* errorMessage) {
+    return PackageRegistry::removeInstalledPackage(PackageKind::Plugin, pluginId, errorMessage);
+}
+
+QString ExternalPackageManager::buildInstalledToolDescriptorPath(const QString& toolId) {
+    return QDir(appToolsRootPath()).filePath(toolId + "/descriptor.apehts");
+}
+
+QString ExternalPackageManager::buildInstalledPluginDescriptorPath(const QString& pluginId) {
+    return QDir(appPluginsRootPath()).filePath(pluginId + "/descriptor.htsplugin");
 }
 
 bool ExternalPackageManager::isSamePath(const QString& left, const QString& right) {
@@ -516,7 +591,15 @@ bool ExternalPackageManager::toolPackageIsComplete(const QString& directoryPath,
                                                    const QJsonObject& metaData,
                                                    QString* errorMessage) {
     LocalizationManager& loc = LocalizationManager::instance();
-    const QString toolName = metaData.value("id").toString().trimmed();
+    const QString toolId = metaData.value("id").toString().trimmed();
+    const QString toolName = metaData.value("name").toString().trimmed();
+
+    if (!PackageRegistry::isValidPackageId(PackageKind::Tool, toolId)) {
+        if (errorMessage) {
+            *errorMessage = loc.getString("ExternalPackage", "ToolDescriptorInvalidId").arg(toolId);
+        }
+        return false;
+    }
 
     if (toolName.isEmpty()) {
         if (errorMessage) {
@@ -533,7 +616,8 @@ bool ExternalPackageManager::toolPackageIsComplete(const QString& directoryPath,
         return false;
     }
 
-    if (!directoryContainsLibrary(directoryPath)) {
+    const QString expectedLibraryPath = QDir(directoryPath).filePath(toolName + runtimeLibraryExtension());
+    if (!QFile::exists(expectedLibraryPath)) {
         if (errorMessage) {
             *errorMessage = loc.getString("ExternalPackage", "ToolRuntimeLibraryMissing").arg(toolName);
         }
@@ -583,16 +667,19 @@ bool ExternalPackageManager::pluginPackageIsComplete(const QString& directoryPat
         return false;
     }
 
-    if (pluginName.trimmed().isEmpty()) {
+    const QString trimmedPluginName = pluginName.trimmed();
+    if (trimmedPluginName.isEmpty()) {
         if (errorMessage) {
             *errorMessage = loc.getString("ExternalPackage", "PluginDescriptorMissingName");
         }
         return false;
     }
 
-    if (!directoryContainsLibrary(directoryPath)) {
+    const QString expectedWindowsLibraryPath = QDir(directoryPath).filePath(QStringLiteral("lib%1.dll").arg(trimmedPluginName));
+    const bool hasExpectedWindowsLibrary = QFile::exists(expectedWindowsLibraryPath);
+    if (!hasExpectedWindowsLibrary && !directoryContainsLibrary(directoryPath)) {
         if (errorMessage) {
-            *errorMessage = loc.getString("ExternalPackage", "PluginRuntimeLibraryMissing").arg(pluginName);
+            *errorMessage = loc.getString("ExternalPackage", "PluginRuntimeLibraryMissing").arg(trimmedPluginName);
         }
         return false;
     }

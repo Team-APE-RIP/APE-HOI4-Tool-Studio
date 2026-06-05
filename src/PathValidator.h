@@ -23,6 +23,7 @@ public:
     QString validateGamePath(const QString& path);
     QString validateModPath(const QString& path);
     QString validateDocPath(const QString& path);
+    QString ensureGamePathDiscovered();
     
     void startMonitoring();
     void stopMonitoring();

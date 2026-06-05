@@ -14,10 +14,13 @@
 #include <QCheckBox>
 #include <QLabel>
 #include <QPushButton>
+#include <QSize>
 #include <QSpinBox>
 
 class QPropertyAnimation;
 class QGraphicsOpacityEffect;
+class ThemeModeButton;
+class DisplayScreenChooserOverlay;
 
 class SettingsPage : public QWidget {
     Q_OBJECT
@@ -26,14 +29,17 @@ public:
     explicit SettingsPage(QWidget *parent = nullptr);
     void updateTexts();
     void updateTheme();
+    void syncDisplaySettingsControls();
 
 signals:
     void closeClicked();
     void showUserAgreement();
     void themeChanged();
     void languageChanged();
+    void gameLanguageChanged();
     void debugModeChanged(bool enabled);
     void sidebarCompactChanged(bool enabled);
+    void displaySettingsChanged();
 
 private slots:
     void openUrl(const QString &url);
@@ -48,11 +54,22 @@ private:
     void setupUi();
     void updateOpenSourceToggleText();
     void refreshOpenSourceLayout();
+    void refreshDisplayModeOptions();
+    void refreshDisplayControls();
+    void refreshResolutionOptions();
+    void refreshGameLanguageOptions();
+    void updateDisplayScreenButtonText();
+    void showDisplayScreenChooser();
     QWidget* createSettingRow(const QString &id, const QString &icon, const QString &title, const QString &desc, QWidget *control);
     QWidget* createGroup(const QString &title, QLayout *contentLayout);
 
-    QComboBox *m_themeCombo;
+    ThemeModeButton *m_themeButton;
     QComboBox *m_languageCombo;
+    QComboBox *m_gameLanguageCombo;
+    QComboBox *m_displayModeCombo;
+    QPushButton *m_displayScreenButton;
+    QComboBox *m_resolutionCombo;
+    DisplayScreenChooserOverlay *m_displayScreenChooser;
     QCheckBox *m_debugCheck;
     QCheckBox *m_sidebarCompactCheck;
     QSpinBox *m_maxLogFilesSpin;

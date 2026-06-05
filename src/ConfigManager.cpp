@@ -7,10 +7,12 @@
 // https://github.com/Team-APE-RIP/APE-HOI4-Tool-Studio/
 //-------------------------------------------------------------------------------------
 #include "ConfigManager.h"
+#include "GameLanguageCatalog.h"
 #include "Logger.h"
 
 #include <QApplication>
 #include <QDebug>
+#include <QDir>
 #include <QFile>
 #include <QJsonDocument>
 #include <QJsonObject>
@@ -29,9 +31,14 @@ const char* kConfigGamePath = "Config/GamePath";
 const char* kConfigModPath = "Config/ModPath";
 const char* kConfigDocPath = "Config/DocPath";
 const char* kConfigLanguage = "Config/Language";
+const char* kConfigGameLanguage = "Config/GameLanguage";
 const char* kConfigTheme = "Config/Theme";
 const char* kConfigDebugMode = "Config/DebugMode";
 const char* kConfigSidebarCompact = "Config/SidebarCompact";
+const char* kConfigDisplayMode = "Config/DisplayMode";
+const char* kConfigDisplayScreen = "Config/DisplayScreen";
+const char* kConfigDisplayResolutionWidth = "Config/DisplayResolutionWidth";
+const char* kConfigDisplayResolutionHeight = "Config/DisplayResolutionHeight";
 const char* kConfigMaxLogFiles = "Config/MaxLogFiles";
 
 const char* kPathInstallPath = "Path/InstallPath";
@@ -39,6 +46,27 @@ const char* kPathAutoSetup = "Path/AutoSetup";
 
 QString readJsonString(const QJsonObject& object, const QString& key) {
     return object.value(key).toString().trimmed();
+}
+
+QJsonObject buildGameLanguageNamesObject(const QString& gamePath, const QString& selectedGameLanguage) {
+    QJsonObject object;
+    QFile file(QDir(gamePath).filePath(QStringLiteral("localisation/languages.yml")));
+    if (!file.open(QIODevice::ReadOnly | QIODevice::Text)) {
+        object[QStringLiteral("l_english")] = QStringLiteral("English");
+        return object;
+    }
+
+    const GameLanguageCatalog::LanguageSections sections =
+        GameLanguageCatalog::parseLanguageSections(QString::fromUtf8(file.readAll()));
+    const QList<GameLanguageCatalog::LanguageOption> options =
+        GameLanguageCatalog::optionsFromEnglishSection(sections);
+    for (const GameLanguageCatalog::LanguageOption& option : options) {
+        object[option.code] = GameLanguageCatalog::localizedLanguageName(
+            sections,
+            option.code,
+            selectedGameLanguage);
+    }
+    return object;
 }
 }
 
@@ -61,11 +89,14 @@ QSettings ConfigManager::createSettings() const {
 void ConfigManager::loadDefaults() {
     m_gamePath.clear();
     m_modPath.clear();
-    m_docPath.clear();
     m_language = "en_US";
+    m_gameLanguage = "l_english";
     m_theme = Theme::System;
     m_debugMode = false;
     m_sidebarCompactMode = false;
+    m_displayMode = DisplayMode::Window;
+    m_displayScreenName.clear();
+    m_displayResolution = QSize(1280, 720);
     m_maxLogFiles = 10;
 }
 
@@ -84,6 +115,14 @@ QString ConfigManager::normalizeLanguageCode(const QString& value) const {
         return "en_US";
     }
 
+    return normalized;
+}
+
+QString ConfigManager::normalizeGameLanguageCode(const QString& value) const {
+    const QString normalized = value.trimmed();
+    if (normalized.isEmpty()) {
+        return QStringLiteral("l_english");
+    }
     return normalized;
 }
 
@@ -136,10 +175,6 @@ void ConfigManager::migrateLegacyConfigFiles() {
         if (!settings.contains(kConfigMaxLogFiles) && object.contains("maxLogFiles")) {
             settings.setValue(kConfigMaxLogFiles, object.value("maxLogFiles").toInt(10));
         }
-        if (!settings.contains(kConfigDocPath) && object.contains("docPath")) {
-            settings.setValue(kConfigDocPath, readJsonString(object, "docPath"));
-        }
-
         shouldRemoveConfig = true;
         configFile.close();
     }
@@ -190,6 +225,12 @@ void ConfigManager::migrateLegacyConfigFiles() {
     if (!settings.contains(kConfigLanguage)) {
         settings.setValue(kConfigLanguage, QString("en_US"));
     }
+    if (!settings.contains(kConfigGameLanguage)) {
+        settings.setValue(kConfigGameLanguage, QStringLiteral("l_english"));
+    }
+    if (settings.contains(kConfigDocPath)) {
+        settings.remove(kConfigDocPath);
+    }
 
     if (shouldRemoveConfig) {
         removeLegacyFile(configPath);
@@ -211,11 +252,26 @@ void ConfigManager::loadConfig() {
     QSettings settings = createSettings();
     m_gamePath = settings.value(kConfigGamePath, "").toString().trimmed();
     m_modPath = settings.value(kConfigModPath, "").toString().trimmed();
-    m_docPath = settings.value(kConfigDocPath, "").toString().trimmed();
+    if (settings.contains(kConfigDocPath)) {
+        settings.remove(kConfigDocPath);
+    }
     m_language = normalizeLanguageCode(settings.value(kConfigLanguage, "en_US").toString());
+    m_gameLanguage = normalizeGameLanguageCode(settings.value(kConfigGameLanguage, "l_english").toString());
     m_theme = static_cast<Theme>(settings.value(kConfigTheme, static_cast<int>(Theme::System)).toInt());
     m_debugMode = settings.value(kConfigDebugMode, false).toBool();
     m_sidebarCompactMode = settings.value(kConfigSidebarCompact, false).toBool();
+    m_displayMode = static_cast<DisplayMode>(
+        settings.value(kConfigDisplayMode, static_cast<int>(DisplayMode::Window)).toInt());
+    if (m_displayMode != DisplayMode::Window && m_displayMode != DisplayMode::Fullscreen) {
+        m_displayMode = DisplayMode::Window;
+    }
+    m_displayScreenName = settings.value(kConfigDisplayScreen, "").toString().trimmed();
+    const int displayWidth = settings.value(kConfigDisplayResolutionWidth, 1280).toInt();
+    const int displayHeight = settings.value(kConfigDisplayResolutionHeight, 720).toInt();
+    m_displayResolution = QSize(displayWidth, displayHeight);
+    if (!m_displayResolution.isValid() || m_displayResolution.width() < 1280 || m_displayResolution.height() < 720) {
+        m_displayResolution = QSize(1280, 720);
+    }
     m_maxLogFiles = settings.value(kConfigMaxLogFiles, 10).toInt();
 
     Logger::instance().setMaxLogFiles(m_maxLogFiles);
@@ -225,11 +281,16 @@ void ConfigManager::saveConfig() {
     QSettings settings = createSettings();
     settings.setValue(kConfigGamePath, m_gamePath);
     settings.setValue(kConfigModPath, m_modPath);
-    settings.setValue(kConfigDocPath, m_docPath);
+    settings.remove(kConfigDocPath);
     settings.setValue(kConfigLanguage, normalizeLanguageCode(m_language));
+    settings.setValue(kConfigGameLanguage, normalizeGameLanguageCode(m_gameLanguage));
     settings.setValue(kConfigTheme, static_cast<int>(m_theme));
     settings.setValue(kConfigDebugMode, m_debugMode);
     settings.setValue(kConfigSidebarCompact, m_sidebarCompactMode);
+    settings.setValue(kConfigDisplayMode, static_cast<int>(m_displayMode));
+    settings.setValue(kConfigDisplayScreen, m_displayScreenName);
+    settings.setValue(kConfigDisplayResolutionWidth, m_displayResolution.width());
+    settings.setValue(kConfigDisplayResolutionHeight, m_displayResolution.height());
     settings.setValue(kConfigMaxLogFiles, m_maxLogFiles);
 }
 
@@ -259,6 +320,18 @@ void ConfigManager::setLanguage(const QString& lang) {
     }
 }
 
+QString ConfigManager::getGameLanguage() const { return m_gameLanguage; }
+
+void ConfigManager::setGameLanguage(const QString& lang) {
+    const QString normalized = normalizeGameLanguageCode(lang);
+    if (m_gameLanguage != normalized) {
+        Logger::instance().logInfo("Config", "Game language changed to: " + normalized);
+        m_gameLanguage = normalized;
+        saveConfig();
+        emit gameLanguageChanged(normalized);
+    }
+}
+
 ConfigManager::Theme ConfigManager::getTheme() const { return m_theme; }
 
 void ConfigManager::setTheme(Theme theme) {
@@ -281,6 +354,43 @@ bool ConfigManager::getSidebarCompactMode() const { return m_sidebarCompactMode;
 void ConfigManager::setSidebarCompactMode(bool enabled) {
     m_sidebarCompactMode = enabled;
     saveConfig();
+}
+
+ConfigManager::DisplayMode ConfigManager::getDisplayMode() const { return m_displayMode; }
+
+void ConfigManager::setDisplayMode(DisplayMode mode) {
+    if (mode != DisplayMode::Window && mode != DisplayMode::Fullscreen) {
+        mode = DisplayMode::Window;
+    }
+
+    if (m_displayMode != mode) {
+        m_displayMode = mode;
+        saveConfig();
+    }
+}
+
+QString ConfigManager::getDisplayScreenName() const { return m_displayScreenName; }
+
+void ConfigManager::setDisplayScreenName(const QString& screenName) {
+    const QString normalized = screenName.trimmed();
+    if (m_displayScreenName != normalized) {
+        m_displayScreenName = normalized;
+        saveConfig();
+    }
+}
+
+QSize ConfigManager::getDisplayResolution() const { return m_displayResolution; }
+
+void ConfigManager::setDisplayResolution(const QSize& resolution) {
+    QSize normalized = resolution;
+    if (!normalized.isValid() || normalized.width() < 1280 || normalized.height() < 720) {
+        normalized = QSize(1280, 720);
+    }
+
+    if (m_displayResolution != normalized) {
+        m_displayResolution = normalized;
+        saveConfig();
+    }
 }
 
 int ConfigManager::getMaxLogFiles() const { return m_maxLogFiles; }
@@ -311,19 +421,14 @@ void ConfigManager::clearGamePath() {
     saveConfig();
 }
 
-QString ConfigManager::getDocPath() const { return m_docPath; }
-
-void ConfigManager::setDocPath(const QString& path) {
-    if (m_docPath != path) {
-        Logger::instance().logInfo("Config", "Doc path changed to: " + path);
-        m_docPath = path;
-        saveConfig();
+QString ConfigManager::getDocPath() const {
+    const QString documentsPath = QStandardPaths::writableLocation(QStandardPaths::DocumentsLocation).trimmed();
+    if (documentsPath.isEmpty()) {
+        return QString();
     }
-}
 
-void ConfigManager::clearDocPath() {
-    m_docPath.clear();
-    saveConfig();
+    return QDir(QDir(documentsPath).filePath(QStringLiteral("Paradox Interactive")))
+        .filePath(QStringLiteral("Hearts of Iron IV"));
 }
 
 bool ConfigManager::isFirstRun() const {
@@ -354,6 +459,8 @@ bool ConfigManager::isCurrentThemeDark() const {
 QJsonObject ConfigManager::toJson() const {
     QJsonObject obj;
     obj["language"] = normalizeLanguageCode(m_language);
+    obj["gameLanguage"] = normalizeGameLanguageCode(m_gameLanguage);
+    obj["gameLanguageNames"] = buildGameLanguageNamesObject(m_gamePath, normalizeGameLanguageCode(m_gameLanguage));
     obj["theme"] = static_cast<int>(m_theme);
     obj["debugMode"] = m_debugMode;
     obj["maxLogFiles"] = m_maxLogFiles;
@@ -362,6 +469,7 @@ QJsonObject ConfigManager::toJson() const {
 
 void ConfigManager::setFromJson(const QJsonObject& obj) {
     if (obj.contains("language")) m_language = normalizeLanguageCode(obj["language"].toString());
+    if (obj.contains("gameLanguage")) m_gameLanguage = normalizeGameLanguageCode(obj["gameLanguage"].toString());
     if (obj.contains("theme")) m_theme = static_cast<Theme>(obj["theme"].toInt());
     if (obj.contains("debugMode")) m_debugMode = obj["debugMode"].toBool();
     if (obj.contains("maxLogFiles")) m_maxLogFiles = obj["maxLogFiles"].toInt();
@@ -373,18 +481,16 @@ void ConfigManager::setFromJson(const QJsonObject& obj) {
 QString ConfigManager::getComboBoxItemStyle(bool isDark) {
     QString text = isDark ? "#FFFFFF" : "#1D1D1F";
     QString itemHover = isDark ? "#3A3A3C" : "rgba(0, 0, 0, 0.05)";
-    QString comboIndicator = isDark ? "#FFFFFF" : "#1D1D1F";
 
     return QString(R"(
         QComboBox QAbstractItemView::item {
-            padding: 6px 12px;
-            border-left: 3px solid transparent;
+            padding: 6px 0px;
             color: %1;
+            text-align: center;
         }
         QComboBox QAbstractItemView::item:hover {
             background-color: %2;
-            border-left: 3px solid %3;
             color: %1;
         }
-    )").arg(text, itemHover, comboIndicator);
+    )").arg(text, itemHover);
 }

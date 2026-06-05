@@ -26,14 +26,12 @@ public:
 
 signals:
     void closeClicked();
-    void gamePathChanged();
     void modClosed();
     void modPathChanged();
 
 private slots:
-    void browseGamePath();
-    void browseDocPath();
     void browseModPath();
+    void uninstallPlugin(const QString& pluginId);
 
 protected:
     void showEvent(QShowEvent *event) override;

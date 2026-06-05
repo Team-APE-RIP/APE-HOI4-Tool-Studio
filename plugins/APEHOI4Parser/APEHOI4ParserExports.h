@@ -17,6 +17,13 @@ APE_HOI4_PARSER_EXPORT uint32_t APE_HOI4Parser_CopyCountryTagEntries(
     uint32_t queryFlags
 );
 
+APE_HOI4_PARSER_EXPORT uint32_t APE_HOI4Parser_GetFontEntryCount(uint32_t queryFlags);
+APE_HOI4_PARSER_EXPORT uint32_t APE_HOI4Parser_CopyFontEntries(
+    APEHOI4ParserFontEntry* outItems,
+    uint32_t capacity,
+    uint32_t queryFlags
+);
+
 APE_HOI4_PARSER_EXPORT APEHOI4ParserSessionHandle APE_HOI4Parser_CreateSession();
 APE_HOI4_PARSER_EXPORT void APE_HOI4Parser_DestroySession(APEHOI4ParserSessionHandle handle);
 
@@ -102,6 +109,16 @@ APE_HOI4_PARSER_EXPORT uint32_t APE_HOI4Parser_GetScriptedTriggerEntryCount(
 APE_HOI4_PARSER_EXPORT uint32_t APE_HOI4Parser_CopyScriptedTriggerEntries(
     APEHOI4ParserSessionHandle handle,
     APEHOI4ParserScriptedTriggerEntry* outItems,
+    uint32_t capacity
+);
+
+APE_HOI4_PARSER_EXPORT uint32_t APE_HOI4Parser_GetFontEntryCountForSession(
+    APEHOI4ParserSessionHandle handle
+);
+
+APE_HOI4_PARSER_EXPORT uint32_t APE_HOI4Parser_CopyFontEntriesForSession(
+    APEHOI4ParserSessionHandle handle,
+    APEHOI4ParserFontEntry* outItems,
     uint32_t capacity
 );
 

@@ -9,24 +9,34 @@
 #include "ToolsPage.h"
 #include "LocalizationManager.h"
 #include "ToolManager.h"
+#include "PackageRegistry.h"
 #include "ConfigManager.h"
+#include "CustomMessageBox.h"
 #include "Logger.h"
 #include <QVBoxLayout>
 #include <QHBoxLayout>
 #include <QScrollArea>
 #include <QFrame>
 #include <QDebug>
-#include <QToolTip>
 #include <QStyle>
 #include <QPropertyAnimation>
 #include <QSequentialAnimationGroup>
 #include <QEasingCurve>
 #include <QEvent>
+#include <QHelpEvent>
 #include <QShowEvent>
 #include <QResizeEvent>
+#include <QGuiApplication>
+#include <QScreen>
+#include <QMenu>
+#include <QMessageBox>
 #include <QStringList>
 
 namespace {
+constexpr int kToolCardWidth = 200;
+constexpr int kMinimumCardGap = 20;
+constexpr int kToolsContentHorizontalMargins = 80;
+
 QStringList splitCompatibleVersions(const QString& versions) {
     return versions.split(";", Qt::SkipEmptyParts);
 }
@@ -83,7 +93,7 @@ AnimatedToolCard::AnimatedToolCard(int rowIndex, QWidget *parent)
     m_button = new QPushButton(this);  // Parent is this widget
     m_button->setObjectName("ToolCard");
     m_button->setCursor(Qt::PointingHandCursor);
-    m_button->setFixedSize(200, CARD_HEIGHT);
+    m_button->setFixedSize(kToolCardWidth, CARD_HEIGHT);
     m_button->installEventFilter(this);
     
     connect(m_button, &QPushButton::clicked, this, &AnimatedToolCard::clicked);
@@ -94,7 +104,7 @@ AnimatedToolCard::AnimatedToolCard(int rowIndex, QWidget *parent)
     m_button->setGraphicsEffect(m_opacityEffect);
     
     // Fixed size for the wrapper - only need space for hover jump (card can go above container)
-    setFixedSize(200, CARD_HEIGHT + HOVER_JUMP_HEIGHT);
+    setFixedSize(kToolCardWidth, CARD_HEIGHT + HOVER_JUMP_HEIGHT);
     
     // Position button at normal position (with space for hover)
     m_button->move(0, HOVER_JUMP_HEIGHT);
@@ -223,6 +233,25 @@ ToolsPage::ToolsPage(QWidget *parent) : QWidget(parent) {
     updateTheme();
 }
 
+bool ToolsPage::eventFilter(QObject *obj, QEvent *event) {
+    QWidget *cardButton = qobject_cast<QWidget*>(obj);
+    if (cardButton && cardButton->property("toolCardTooltip").isValid()) {
+        if (event->type() == QEvent::ToolTip) {
+            auto *helpEvent = static_cast<QHelpEvent*>(event);
+            showToolCardTooltip(cardButton, helpEvent->globalPos());
+            event->accept();
+            return true;
+        }
+        if (event->type() == QEvent::Leave
+            || event->type() == QEvent::MouseButtonPress
+            || event->type() == QEvent::Hide) {
+            hideToolCardTooltip();
+        }
+    }
+
+    return QWidget::eventFilter(obj, event);
+}
+
 void ToolsPage::setupUi() {
     QVBoxLayout *layout = new QVBoxLayout(this);
     layout->setContentsMargins(0, 0, 0, 0);
@@ -266,10 +295,16 @@ void ToolsPage::setupUi() {
     m_rowsLayout->setSpacing(20);
     m_rowsLayout->setContentsMargins(0, 0, 0, 0);
     
-    // Disable clipping to allow drop animation to show cards above container bounds
-    m_cardsContainer->setAttribute(Qt::WA_TranslucentBackground);
-    m_contentWidget->setAttribute(Qt::WA_TranslucentBackground);
-    m_scrollArea->viewport()->setAttribute(Qt::WA_TranslucentBackground);
+    // Keep these layers visually transparent without using WA_TranslucentBackground.
+    m_cardsContainer->setAutoFillBackground(false);
+    m_contentWidget->setAutoFillBackground(false);
+    m_scrollArea->viewport()->setAutoFillBackground(false);
+    m_cardsContainer->setAttribute(Qt::WA_NoSystemBackground, true);
+    m_contentWidget->setAttribute(Qt::WA_NoSystemBackground, true);
+    m_scrollArea->viewport()->setAttribute(Qt::WA_NoSystemBackground, true);
+    m_cardsContainer->setStyleSheet("background: transparent;");
+    m_contentWidget->setStyleSheet("QWidget#ToolsContent { background: transparent; }");
+    m_scrollArea->setStyleSheet("QScrollArea { background: transparent; border: none; } QScrollArea > QWidget > QWidget { background: transparent; }");
 
     contentLayout->addWidget(m_cardsContainer);
     contentLayout->addStretch();
@@ -280,15 +315,31 @@ void ToolsPage::setupUi() {
     // Animation layer - covers the entire ToolsPage for drop animations
     m_animationLayer = new QWidget(this);
     m_animationLayer->setAttribute(Qt::WA_TransparentForMouseEvents);
-    m_animationLayer->setAttribute(Qt::WA_TranslucentBackground);
+    m_animationLayer->setAttribute(Qt::WA_NoSystemBackground, true);
+    m_animationLayer->setAutoFillBackground(false);
     m_animationLayer->setStyleSheet("background: transparent;");
     m_animationLayer->hide();
+
+    m_tooltipPopup = new QLabel(nullptr, Qt::ToolTip | Qt::FramelessWindowHint | Qt::NoDropShadowWindowHint);
+    m_tooltipPopup->setObjectName("ToolsPageTooltip");
+    m_tooltipPopup->setTextFormat(Qt::RichText);
+    m_tooltipPopup->setWordWrap(true);
+    m_tooltipPopup->setMargin(0);
+    m_tooltipPopup->setAlignment(Qt::AlignLeft | Qt::AlignTop);
+    m_tooltipPopup->hide();
 }
 
 void ToolsPage::resizeEvent(QResizeEvent *event) {
     QWidget::resizeEvent(event);
     // Keep animation layer covering the entire page
     m_animationLayer->setGeometry(0, 0, width(), height());
+
+    QTimer::singleShot(0, this, [this]() {
+        const int nextCardsPerRow = cardsPerRowForWidth(availableCardsWidth());
+        if (nextCardsPerRow != m_currentCardsPerRow) {
+            relayoutToolCards();
+        }
+    });
 }
 
 void ToolsPage::showEvent(QShowEvent *event) {
@@ -297,9 +348,143 @@ void ToolsPage::showEvent(QShowEvent *event) {
     QTimer::singleShot(50, this, &ToolsPage::playDropAnimations);
 }
 
+void ToolsPage::showToolCardTooltip(QWidget *cardButton, const QPoint& globalPos) {
+    if (!cardButton || !m_tooltipPopup) {
+        return;
+    }
+
+    const QString tooltip = cardButton->property("toolCardTooltip").toString();
+    if (tooltip.trimmed().isEmpty()) {
+        hideToolCardTooltip();
+        return;
+    }
+
+    updateToolCardTooltipStyle();
+    m_tooltipPopup->setText(tooltip);
+    m_tooltipPopup->setMaximumWidth(340);
+    m_tooltipPopup->adjustSize();
+
+    const QSize popupSize = m_tooltipPopup->sizeHint();
+    QPoint pos = globalPos + QPoint(14, 18);
+
+    if (QScreen *screen = QGuiApplication::screenAt(globalPos)) {
+        const QRect available = screen->availableGeometry();
+        if (pos.x() + popupSize.width() > available.right()) {
+            pos.setX(qMax(available.left(), globalPos.x() - popupSize.width() - 14));
+        }
+        if (pos.y() + popupSize.height() > available.bottom()) {
+            pos.setY(qMax(available.top(), globalPos.y() - popupSize.height() - 14));
+        }
+    }
+
+    m_tooltipPopup->move(pos);
+    m_tooltipPopup->show();
+    m_tooltipPopup->raise();
+}
+
+void ToolsPage::hideToolCardTooltip() {
+    if (m_tooltipPopup) {
+        m_tooltipPopup->hide();
+    }
+}
+
+void ToolsPage::showToolCardContextMenu(ToolInterface* tool, const QPoint& globalPos) {
+    if (!tool) {
+        return;
+    }
+
+    hideToolCardTooltip();
+
+    const RegisteredPackage toolPackage = PackageRegistry::registeredPackage(PackageKind::Tool, tool->id());
+    LocalizationManager& loc = LocalizationManager::instance();
+    QMenu menu(this);
+    QAction *uninstallAction = menu.addAction(loc.getString("ToolsPage", "UninstallTool"));
+    uninstallAction->setEnabled(toolPackage.isValid() && !toolPackage.official);
+    if (toolPackage.official) {
+        uninstallAction->setToolTip(loc.getString("ToolsPage", "OfficialToolProtected"));
+    }
+
+    QAction *selectedAction = menu.exec(globalPos);
+    if (selectedAction == uninstallAction && uninstallAction->isEnabled()) {
+        uninstallTool(tool->id());
+    }
+}
+
+void ToolsPage::uninstallTool(const QString& toolId) {
+    const RegisteredPackage toolPackage = PackageRegistry::registeredPackage(PackageKind::Tool, toolId);
+    LocalizationManager& loc = LocalizationManager::instance();
+    if (!toolPackage.isValid() || toolPackage.official) {
+        return;
+    }
+
+    const QMessageBox::StandardButton answer = CustomMessageBox::question(
+        this,
+        loc.getString("ToolsPage", "UninstallToolTitle"),
+        loc.getString("ToolsPage", "UninstallToolMessage").arg(toolPackage.name)
+    );
+    if (answer != QMessageBox::Yes) {
+        return;
+    }
+
+    QString errorMessage;
+    if (!PackageRegistry::removeInstalledPackage(PackageKind::Tool, toolId, &errorMessage)) {
+        CustomMessageBox::information(
+            this,
+            loc.getString("ToolsPage", "UninstallToolFailedTitle"),
+            errorMessage
+        );
+        return;
+    }
+
+    ToolManager::instance().loadTools();
+    refreshTools();
+}
+
+void ToolsPage::updateToolCardTooltipStyle() {
+    if (!m_tooltipPopup) {
+        return;
+    }
+
+    const bool isDark = ConfigManager::instance().isCurrentThemeDark();
+    const QString background = isDark ? "#2C2C2E" : "#FFFFFF";
+    const QString text = isDark ? "#F5F5F7" : "#1D1D1F";
+    const QString border = isDark ? "#5C5C5F" : "#D2D2D7";
+    m_tooltipPopup->setStyleSheet(QString(
+        "QLabel#ToolsPageTooltip {"
+        "background-color: %1;"
+        "color: %2;"
+        "border: 1px solid %3;"
+        "border-radius: 6px;"
+        "padding: 8px 10px;"
+        "}"
+    ).arg(background, text, border));
+}
+
 void ToolsPage::refreshTools() {
     Logger::instance().logInfo("ToolsPage", "Refreshing tools...");
-    
+    relayoutToolCards();
+}
+
+int ToolsPage::availableCardsWidth() const {
+    int availableWidth = 0;
+    if (m_scrollArea && m_scrollArea->viewport()) {
+        availableWidth = qMax(availableWidth, m_scrollArea->viewport()->width());
+    }
+    if (m_contentWidget) {
+        availableWidth = qMax(availableWidth, m_contentWidget->width());
+    }
+    if (availableWidth <= 0) {
+        availableWidth = width();
+    }
+    return qMax(0, availableWidth - kToolsContentHorizontalMargins);
+}
+
+int ToolsPage::cardsPerRowForWidth(int availableWidth) const {
+    const int safeWidth = qMax(kToolCardWidth, availableWidth);
+    return qMax(1, (safeWidth + kMinimumCardGap) / (kToolCardWidth + kMinimumCardGap));
+}
+
+void ToolsPage::relayoutToolCards() {
     // Clear existing rows
     QLayoutItem *rowItem;
     while ((rowItem = m_rowsLayout->takeAt(0)) != nullptr) {
@@ -317,10 +502,14 @@ void ToolsPage::refreshTools() {
         delete rowItem;
     }
     m_toolCards.clear();
+    hideToolCardTooltip();
 
     QList<ToolInterface*> tools = ToolManager::instance().getTools();
     Logger::instance().logInfo("ToolsPage", QString("Found %1 tools.").arg(tools.size()));
-    
+
+    const int cardsPerRow = cardsPerRowForWidth(availableCardsWidth());
+    m_currentCardsPerRow = cardsPerRow;
+
     int index = 0;
     int col = 0;
     int row = 0;
@@ -346,7 +535,7 @@ void ToolsPage::refreshTools() {
         col++;
         index++;
         
-        if (col >= MAX_COLS) {
+        if (col >= cardsPerRow) {
             col = 0;
             row++;
         }
@@ -449,9 +638,13 @@ QWidget* ToolsPage::createToolCard(ToolInterface* tool, int index, int rowIndex)
     
     AnimatedToolCard *cardWrapper = new AnimatedToolCard(rowIndex);
     QPushButton *card = cardWrapper->button();
+    card->setContextMenuPolicy(Qt::CustomContextMenu);
     
     QString toolId = tool->id();
     connect(cardWrapper, &AnimatedToolCard::clicked, [this, toolId](){ emit toolSelected(toolId); });
+    connect(card, &QPushButton::customContextMenuRequested, this, [this, card, tool](const QPoint& pos) {
+        showToolCardContextMenu(tool, card->mapToGlobal(pos));
+    });
 
     QVBoxLayout *layout = new QVBoxLayout(card);
     layout->setContentsMargins(0, 0, 0, 0);
@@ -557,20 +750,23 @@ void ToolsPage::updateTexts() {
                        .arg(warning);
         }
         
-        card.cardWidget->button()->setToolTip(tooltip); 
+        QPushButton *button = card.cardWidget->button();
+        button->setToolTip(QString());
+        button->setProperty("toolCardTooltip", tooltip);
+        button->installEventFilter(this);
     }
 }
 
 void ToolsPage::updateTheme() {
     bool isDark = ConfigManager::instance().isCurrentThemeDark();
     
-    QString cardBg = isDark ? "#3A3A3C" : "#EEEEEE";
-    QString cardBorder = isDark ? "#2C2C2E" : "#F5F5F7";
-    QString cardHover = isDark ? "#2C2C2E" : "#F5F5F7";
-    QString titleBg = isDark ? "#1C1C1E" : "#FFFFFF";
+    QString cardBg = isDark ? "rgba(44, 44, 46, 0.50)" : "rgba(255, 255, 255, 0.58)";
+    QString cardBorder = isDark ? "rgba(255, 255, 255, 0.14)" : "rgba(60, 60, 67, 0.16)";
+    QString cardHover = isDark ? "rgba(58, 58, 60, 0.62)" : "rgba(255, 255, 255, 0.72)";
+    QString titleBg = isDark ? "rgba(30, 30, 32, 0.42)" : "rgba(246, 246, 248, 0.48)";
     QString titleText = isDark ? "#FFFFFF" : "#1D1D1F";
-    QString placeholderBg = isDark ? "#3A3A3C" : "#E8E8E8";
-    QString placeholderText = isDark ? "#888888" : "#666666";
+    QString placeholderBg = isDark ? "rgba(58, 58, 60, 0.56)" : "rgba(232, 232, 237, 0.58)";
+    QString placeholderText = isDark ? "#A1A1A6" : "#6E6E73";
 
     QString cardStyle = QString(R"(
         QPushButton#ToolCard {
@@ -619,4 +815,5 @@ void ToolsPage::updateTheme() {
         
         card.cardWidget->button()->update();
     }
+    updateToolCardTooltipStyle();
 }

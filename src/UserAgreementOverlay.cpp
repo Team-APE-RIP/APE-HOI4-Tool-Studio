@@ -10,6 +10,7 @@
 #include "AgreementEvidenceManager.h"
 #include "ConfigManager.h"
 #include "LocalizationManager.h"
+#include "OverlayAcrylicMaterial.h"
 #include <QPainter>
 #include <QPainterPath>
 #include <QApplication>
@@ -32,6 +33,7 @@ UserAgreementOverlay::UserAgreementOverlay(QWidget *parent)
 {
     setAttribute(Qt::WA_TransparentForMouseEvents, false);
     setAttribute(Qt::WA_TranslucentBackground);
+    OverlayAcrylicMaterial::installLiveRefresh(this);
     
     setupUi();
     updateTheme();
@@ -48,7 +50,7 @@ UserAgreementOverlay::~UserAgreementOverlay() {
 }
 
 void UserAgreementOverlay::setupUi() {
-    m_container = new QWidget(this);
+    m_container = new OverlayAcrylicPanel(this);
     m_container->setObjectName("UserAgreementContainer");
     m_container->setFixedSize(600, 450);
     
@@ -94,13 +96,13 @@ void UserAgreementOverlay::setupUi() {
     btnLayout->setContentsMargins(0, 0, 0, 0);
     btnLayout->setSpacing(15);
     
-    m_rejectBtn = new QPushButton(m_buttonContainer);
+    m_rejectBtn = new OverlayAcrylicButton(OverlayAcrylicButton::Role::Secondary, m_buttonContainer);
     m_rejectBtn->setObjectName("RejectBtn");
     m_rejectBtn->setCursor(Qt::PointingHandCursor);
     m_rejectBtn->setFixedHeight(32);
     connect(m_rejectBtn, &QPushButton::clicked, this, &UserAgreementOverlay::onRejectClicked);
     
-    m_acceptBtn = new QPushButton(m_buttonContainer);
+    m_acceptBtn = new OverlayAcrylicButton(OverlayAcrylicButton::Role::Accent, m_buttonContainer);
     m_acceptBtn->setObjectName("AcceptBtn");
     m_acceptBtn->setCursor(Qt::PointingHandCursor);
     m_acceptBtn->setFixedHeight(32);
@@ -132,27 +134,19 @@ void UserAgreementOverlay::setupUi() {
 void UserAgreementOverlay::updateTheme() {
     bool isDark = ConfigManager::instance().isCurrentThemeDark();
     
-    QString containerBg = isDark ? "#2C2C2E" : "#FFFFFF";
     QString textColor = isDark ? "#FFFFFF" : "#1D1D1F";
-    QString textBg = isDark ? "#1C1C1E" : "#F5F5F7";
+    QString textBg = isDark ? "rgba(28, 28, 30, 0.54)" : "rgba(255, 255, 255, 0.48)";
     QString borderColor = isDark ? "#3A3A3C" : "#D2D2D7";
-    QString primaryBtnBg = "#007AFF";
-    QString primaryBtnHoverBg = "#0062CC";
-    QString disabledBtnBg = isDark ? "#3A3A3C" : "#D1D1D6";
-    QString disabledBtnText = isDark ? "#8E8E93" : "#8E8E93";
-    QString secondaryBtnBg = isDark ? "#3A3A3C" : "#E5E5EA";
-    QString secondaryBtnHoverBg = isDark ? "#48484A" : "#D1D1D6";
     QString secondaryBtnText = isDark ? "#FFFFFF" : "#1D1D1F";
     QString statusTextColor = isDark ? "#A1A1AA" : "#6E6E73";
     QString readyStatusTextColor = isDark ? "#32D74B" : "#1F9D3A";
     
     m_container->setStyleSheet(QString(
         "QWidget#UserAgreementContainer {"
-        "  background-color: %1;"
-        "  border: 1px solid %2;"
-        "  border-radius: 12px;"
+        "  background-color: transparent;"
+        "  border: none;"
         "}"
-    ).arg(containerBg, borderColor));
+    ));
     
     m_titleLabel->setStyleSheet(QString("color: %1;").arg(textColor));
     
@@ -179,33 +173,30 @@ void UserAgreementOverlay::updateTheme() {
     
     m_acceptBtn->setStyleSheet(QString(
         "QPushButton#AcceptBtn {"
-        "  background-color: %1;"
+        "  background-color: transparent;"
         "  color: #FFFFFF;"
         "  border: none;"
-        "  border-radius: 6px;"
         "  font-weight: 500;"
         "}"
         "QPushButton#AcceptBtn:hover {"
-        "  background-color: %2;"
+        "  background-color: transparent;"
         "}"
         "QPushButton#AcceptBtn:disabled {"
-        "  background-color: %3;"
-        "  color: %4;"
+        "  background-color: transparent;"
         "}"
-    ).arg(primaryBtnBg, primaryBtnHoverBg, disabledBtnBg, disabledBtnText));
+    ));
     
     m_rejectBtn->setStyleSheet(QString(
         "QPushButton#RejectBtn {"
-        "  background-color: %1;"
-        "  color: %2;"
+        "  background-color: transparent;"
+        "  color: %1;"
         "  border: none;"
-        "  border-radius: 6px;"
         "  font-weight: 500;"
         "}"
         "QPushButton#RejectBtn:hover {"
-        "  background-color: %3;"
+        "  background-color: transparent;"
         "}"
-    ).arg(secondaryBtnBg, secondaryBtnText, secondaryBtnHoverBg));
+    ).arg(secondaryBtnText));
 }
 
 void UserAgreementOverlay::updateTexts() {
@@ -262,7 +253,10 @@ void UserAgreementOverlay::loadAgreementContent() {
     QFile file(mdPath);
     if (!file.open(QIODevice::ReadOnly | QIODevice::Text) && mdPath != ":/UserAgreement/en_US.md") {
         file.setFileName(":/UserAgreement/en_US.md");
-        file.open(QIODevice::ReadOnly | QIODevice::Text);
+        if (!file.open(QIODevice::ReadOnly | QIODevice::Text)) {
+            m_textBrowser->setPlainText("Failed to load user agreement.");
+            return;
+        }
     }
 
     if (file.isOpen()) {
@@ -464,13 +458,13 @@ void UserAgreementOverlay::paintEvent(QPaintEvent *event) {
     QPainter painter(this);
     painter.setRenderHint(QPainter::Antialiasing);
     
-    QPainterPath path;
-    QRectF r = rect();
-    qreal radius = 9;
-    
-    path.addRoundedRect(r, radius, radius);
-    
-    painter.fillPath(path, QColor(0, 0, 0, 150));
+    OverlayAcrylicMaterial::paintOverlayBackdrop(
+        painter,
+        this,
+        QRectF(rect()),
+        9.0,
+        ConfigManager::instance().isCurrentThemeDark(),
+        132);
 }
 
 bool UserAgreementOverlay::eventFilter(QObject *obj, QEvent *event) {

@@ -1,6 +1,7 @@
 #include "ParserSession.h"
 
 #include "../Domain/Focus/FocusTreeParser.h"
+#include "../Domain/Fonts/FontGfxParser.h"
 #include "../Domain/Ideas/IdeasParser.h"
 #include "../Domain/Localization/LocalizationParser.h"
 #include "../Domain/ScriptedEffects/ScriptedEffectParser.h"
@@ -64,6 +65,26 @@ static bool containsPathPart(const std::string& normalizedPath, const char* frag
     return normalizedPath.find(fragment) != std::string::npos;
 }
 
+static std::string serializeFontTextColors(const std::vector<FontGfxTextColor>& textColors) {
+    std::string result;
+    for (const FontGfxTextColor& textColor : textColors) {
+        if (textColor.code.empty()) {
+            continue;
+        }
+        if (!result.empty()) {
+            result.push_back(';');
+        }
+        result += textColor.code;
+        result.push_back('=');
+        result += std::to_string(textColor.red);
+        result.push_back(',');
+        result += std::to_string(textColor.green);
+        result.push_back(',');
+        result += std::to_string(textColor.blue);
+    }
+    return result;
+}
+
 static uint32_t inferDocumentKindFromPath(std::string_view logicalPathUtf8, uint32_t requestedDocumentKind) {
     if (requestedDocumentKind != APE_HOI4_PARSER_DOCUMENT_UNKNOWN) {
         return requestedDocumentKind;
@@ -84,6 +105,11 @@ static uint32_t inferDocumentKindFromPath(std::string_view logicalPathUtf8, uint
 
     if (containsPathPart(normalizedPath, "/common/national_focus/")) {
         return APE_HOI4_PARSER_DOCUMENT_FOCUS;
+    }
+
+    if (containsPathPart(normalizedPath, "/interface/")
+        && containsPathPart(normalizedPath, ".gfx")) {
+        return APE_HOI4_PARSER_DOCUMENT_FONT_GFX;
     }
 
     if (containsPathPart(normalizedPath, "/common/ideas/")
@@ -591,6 +617,34 @@ bool ParserSession::parseBuffer(
         appendFocusDiagnostics(sourceText.view(), m_focusEntries, m_diagnostics);
         break;
     }
+    case APE_HOI4_PARSER_DOCUMENT_FONT_GFX: {
+        const std::vector<FontGfxDomainEntry> domainEntries = parseFontGfxDocument(sourceText.view());
+        m_fontGlobalTextColors = serializeFontTextColors(parseFontGfxGlobalTextColors(sourceText.view()));
+        m_fontEntries.reserve(domainEntries.size());
+
+        for (const FontGfxDomainEntry& entry : domainEntries) {
+            FontRecord record;
+            record.name = entry.name;
+            record.path = entry.path;
+            record.color = entry.color;
+            for (const std::string& fontFile : entry.fontFiles) {
+                if (!record.fontFiles.empty()) {
+                    record.fontFiles.push_back(';');
+                }
+                record.fontFiles += fontFile;
+            }
+            for (const std::string& language : entry.languages) {
+                if (!record.languages.empty()) {
+                    record.languages.push_back(';');
+                }
+                record.languages += language;
+            }
+            record.textColors = serializeFontTextColors(entry.textColors);
+            record.nameRange = entry.nameRange;
+            m_fontEntries.push_back(std::move(record));
+        }
+        break;
+    }
     case APE_HOI4_PARSER_DOCUMENT_UNKNOWN: {
         const std::string normalizedPath = normalizePath(logicalPathUtf8);
 
@@ -791,6 +845,32 @@ uint32_t ParserSession::copyScriptedTriggerEntries(APEHOI4ParserScriptedTriggerE
     return copyCount;
 }
 
+uint32_t ParserSession::getFontEntryCount() const {
+    return static_cast<uint32_t>(m_fontEntries.size());
+}
+
+uint32_t ParserSession::copyFontEntries(APEHOI4ParserFontEntry* outItems, uint32_t capacity) const {
+    if (outItems == nullptr || capacity == 0) {
+        return 0;
+    }
+
+    const uint32_t copyCount = clampCountToCapacity(static_cast<uint32_t>(m_fontEntries.size()), capacity);
+    for (uint32_t i = 0; i < copyCount; ++i) {
+        outItems[i].nameUtf8 = m_fontEntries[i].name.c_str();
+        outItems[i].pathUtf8 = m_fontEntries[i].path.c_str();
+        outItems[i].colorUtf8 = m_fontEntries[i].color.c_str();
+        outItems[i].fontFilesUtf8 = m_fontEntries[i].fontFiles.c_str();
+        outItems[i].languagesUtf8 = m_fontEntries[i].languages.c_str();
+        outItems[i].textColorsUtf8 = m_fontEntries[i].textColors.c_str();
+        outItems[i].nameRange = m_fontEntries[i].nameRange;
+    }
+    return copyCount;
+}
+
+const char* ParserSession::getFontGlobalTextColorsUtf8() const {
+    return m_fontGlobalTextColors.c_str();
+}
+
 ParseStatsRecord ParserSession::getParseStats() const {
     return m_parseStats;
 }
@@ -819,6 +899,8 @@ void ParserSession::clearDomainState() {
     m_focusEntries.clear();
     m_ideaEntries.clear();
     m_scriptedTriggerEntries.clear();
+    m_fontEntries.clear();
+    m_fontGlobalTextColors.clear();
     m_scriptedEffectEntries.clear();
 }
 

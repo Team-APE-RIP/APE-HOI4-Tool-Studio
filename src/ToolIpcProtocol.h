@@ -26,16 +26,8 @@ enum class MessageType : quint32 {
     Heartbeat = 3,
     HeartbeatAck = 4,
     
-    // Widget management
-    CreateWidget = 10,
-    CreateWidgetResponse = 11,
-    CreateSidebarWidget = 12,
-    CreateSidebarWidgetResponse = 13,
-    DestroyWidget = 14,
-    ShowWidget = 15,
-    ShowWidgetResponse = 16,
-    ResizeWidget = 17,
-    
+    // Legacy widget hosting messages were removed in the QML host architecture.
+
     // Tool info
     GetToolInfo = 20,
     ToolInfoResponse = 21,
@@ -49,31 +41,49 @@ enum class MessageType : quint32 {
     ConfigResponse = 41,
     GetFileIndex = 42,
     FileIndexResponse = 43,
-    GetPluginBinaryPath = 44,
-    PluginBinaryPathResponse = 45,
-    ReadBinaryFile = 46,
-    ReadBinaryFileResponse = 47,
-    ReadTextFile = 48,
-    ReadTextFileResponse = 49,
-    ReadEffectiveBinaryFile = 50,
-    ReadEffectiveBinaryFileResponse = 51,
-    ReadEffectiveTextFile = 52,
-    ReadEffectiveTextFileResponse = 53,
-    WriteBinaryFile = 54,
-    WriteBinaryFileResponse = 55,
-    WriteTextFile = 56,
-    WriteTextFileResponse = 57,
-    RemovePath = 58,
-    RemovePathResponse = 59,
-    EnsureDirectory = 60,
-    EnsureDirectoryResponse = 61,
-    ListDirectory = 62,
-    ListDirectoryResponse = 63,
+    InvokePlugin = 44,
+    InvokePluginResponse = 45,
+    ReadMatchingTextFiles = 46,
+    ReadMatchingTextFilesResponse = 47,
+    ReadBinaryFile = 48,
+    ReadBinaryFileResponse = 49,
+    ReadTextFile = 50,
+    ReadTextFileResponse = 51,
+    ReadEffectiveBinaryFile = 52,
+    ReadEffectiveBinaryFileResponse = 53,
+    ReadEffectiveTextFile = 54,
+    ReadEffectiveTextFileResponse = 55,
+    WriteBinaryFile = 56,
+    WriteBinaryFileResponse = 57,
+    WriteTextFile = 58,
+    WriteTextFileResponse = 59,
+    RemovePath = 60,
+    RemovePathResponse = 61,
+    EnsureDirectory = 62,
+    EnsureDirectoryResponse = 63,
+    ListDirectory = 64,
+    ListDirectoryResponse = 65,
+    ListEffectiveFiles = 66,
+    ListEffectiveFilesResponse = 67,
+    ReadEffectiveTextFiles = 68,
+    ReadEffectiveTextFilesResponse = 69,
     
     // Data notifications (Host -> Tool)
     ConfigChanged = 70,
     FileIndexChanged = 71,
     ThemeChanged = 72,
+    
+    // UI state synchronization (QML host <-> Worker)
+    UiAction = 80,
+    UiActionResponse = 81,
+    StateUpdate = 82,
+    StateQuery = 83,
+    StateQueryResponse = 84,
+    
+    // Worker management
+    WorkerHeartbeat = 90,
+    WorkerShutdown = 91,
+    WorkerReady = 92,
     
     // Error
     Error = 100,
@@ -177,29 +187,6 @@ struct ToolInfo {
             }
         }
         return info;
-    }
-};
-
-// Window handle wrapper (platform-specific)
-struct WindowHandle {
-    qint64 handle;
-    int width;
-    int height;
-    
-    QJsonObject toJson() const {
-        QJsonObject obj;
-        obj["handle"] = handle;
-        obj["width"] = width;
-        obj["height"] = height;
-        return obj;
-    }
-    
-    static WindowHandle fromJson(const QJsonObject& obj) {
-        WindowHandle wh;
-        wh.handle = obj["handle"].toInteger();
-        wh.width = obj["width"].toInt();
-        wh.height = obj["height"].toInt();
-        return wh;
     }
 };
 

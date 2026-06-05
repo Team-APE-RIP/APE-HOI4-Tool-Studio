@@ -10,7 +10,7 @@ l_en_US:
   ConfirmButton: "Start Studio"
   BrowseButton: "Browse"
   ErrorTitle: "Error"
-  ErrorMsg: "Please select directories."
+  ErrorMsg: "Please select a mod directory."
   SelectGameDir: "Select Game Directory"
   SelectDocDir: "Select Documents Directory"
   SelectModDir: "Select Mod Directory"

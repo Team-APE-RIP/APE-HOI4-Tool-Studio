@@ -75,6 +75,7 @@ std::string buildDebugSyntaxTreeJson(const ParserSession& session) {
 
     const std::vector<IdeaRecord>& ideaEntries = session.m_ideaEntries;
     const std::vector<ScriptedTriggerRecord>& scriptedTriggerEntries = session.m_scriptedTriggerEntries;
+    const std::vector<FontRecord>& fontEntries = session.m_fontEntries;
     const std::vector<ScriptedEffectRecord>& scriptedEffectEntries = session.m_scriptedEffectEntries;
 
     std::ostringstream stream;
@@ -159,6 +160,22 @@ std::string buildDebugSyntaxTreeJson(const ParserSession& session) {
         stream << "\"id\":\"" << escapeJsonString(scriptedTriggerEntries[i].id) << "\",";
         stream << "\"idRange\":";
         appendRangeJson(stream, scriptedTriggerEntries[i].idRange);
+        stream << "}";
+    }
+    stream << "],";
+
+    stream << "\"fonts\":[";
+    for (size_t i = 0; i < fontEntries.size(); ++i) {
+        if (i != 0) {
+            stream << ",";
+        }
+
+        stream << "{";
+        stream << "\"name\":\"" << escapeJsonString(fontEntries[i].name) << "\",";
+        stream << "\"path\":\"" << escapeJsonString(fontEntries[i].path) << "\",";
+        stream << "\"fontFiles\":\"" << escapeJsonString(fontEntries[i].fontFiles) << "\",";
+        stream << "\"nameRange\":";
+        appendRangeJson(stream, fontEntries[i].nameRange);
         stream << "}";
     }
     stream << "],";

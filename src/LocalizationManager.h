@@ -25,6 +25,8 @@ public:
     QStringList availableLanguageDisplayNames() const;
     QString displayNameForLanguage(const QString& langCode) const;
     QString normalizeLanguageCode(const QString& value) const;
+    QString resolveToolLanguageCode(const QString& toolDirectoryPath, const QString& requestedValue) const;
+    QMap<QString, QString> loadToolStrings(const QString& toolDirectoryPath, const QString& langCode) const;
 
 private:
     LocalizationManager();

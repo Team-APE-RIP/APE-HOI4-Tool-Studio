@@ -1,0 +1,14 @@
+<svg width="170" height="35" viewBox="0 0 170 35" fill="none" xmlns="http://www.w3.org/2000/svg">
+  <defs>
+    <linearGradient id="apeWordmarkGradient" x1="0" y1="4" x2="170" y2="31" gradientUnits="userSpaceOnUse">
+      <stop offset="0" stop-color="#ff76c2"/>
+      <stop offset="0.52" stop-color="#e85ccf"/>
+      <stop offset="1" stop-color="#c456cf"/>
+    </linearGradient>
+  </defs>
+  <g fill="url(#apeWordmarkGradient)" fill-rule="evenodd">
+    <path d="M0 31L14.8 4H25.6L40.4 31H28.8L26.3 25.3H13.7L11.2 31H0ZM17.5 18.3H22.5L20 12L17.5 18.3Z"/>
+    <path d="M38.5 31V4H63.2C73.8 4 79.7 8.5 79.7 16.2C79.7 23.9 73.8 28.4 63.2 28.4H50.7V31H38.5ZM50.7 20.3H61.8C65.7 20.3 67.8 18.9 67.8 16.2C67.8 13.5 65.7 12.1 61.8 12.1H50.7V20.3Z"/>
+    <path d="M77.5 31V4H99.3L94.1 11.6H89.6V14.3H96.8V21.4H89.6V23.6H170L162.5 31H77.5Z"/>
+  </g>
+</svg>

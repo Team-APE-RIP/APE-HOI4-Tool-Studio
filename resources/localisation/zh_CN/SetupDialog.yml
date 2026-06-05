@@ -10,7 +10,7 @@ l_zh_CN:
   ConfirmButton: "启动工作室"
   BrowseButton: "浏览"
   ErrorTitle: "错误"
-  ErrorMsg: "请选择目录。"
+  ErrorMsg: "请选择 Mod 目录。"
   SelectGameDir: "选择游戏目录"
   SelectDocDir: "选择文档目录"
   SelectModDir: "选择 Mod 目录"

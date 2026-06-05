@@ -11,6 +11,7 @@
 #include "ConfigManager.h"
 #include "LocalizationManager.h"
 #include "Logger.h"
+#include "OverlayControlStyle.h"
 #include <QVBoxLayout>
 #include <QHBoxLayout>
 #include <QScrollArea>
@@ -57,9 +58,9 @@ void AccountPage::setupUi() {
     title->setStyleSheet("font-size: 18px; font-weight: bold;");
     
     QPushButton *closeBtn = new QPushButton("×");
+    closeBtn->setObjectName("OverlayCloseButton");
     closeBtn->setFixedSize(30, 30);
     closeBtn->setCursor(Qt::PointingHandCursor);
-    closeBtn->setStyleSheet("border: none; font-size: 20px; color: #888;");
     connect(closeBtn, &QPushButton::clicked, this, &AccountPage::closeClicked);
 
     headerLayout->addWidget(title);
@@ -88,7 +89,6 @@ void AccountPage::setupUi() {
     m_logoutBtn = new QPushButton("Logout");
     m_logoutBtn->setObjectName("LogoutBtn");
     m_logoutBtn->setCursor(Qt::PointingHandCursor);
-    m_logoutBtn->setStyleSheet("QPushButton { color: #FF3B30; border: 1px solid #FF3B30; border-radius: 6px; padding: 5px 15px; background-color: transparent; } QPushButton:hover { background-color: rgba(255, 59, 48, 0.1); }");
     connect(m_logoutBtn, &QPushButton::clicked, this, &AccountPage::logoutRequested);
 
     accountLayout->addWidget(createSettingRow("UserInfo", ":/icons/user.svg", "Current User", "Logged in as", m_logoutBtn));
@@ -110,13 +110,13 @@ QWidget* AccountPage::createGroup(const QString &title, QLayout *contentLayout) 
 
     QLabel *titleLabel = new QLabel(title);
     titleLabel->setObjectName(title + "_GroupTitle");
-    titleLabel->setStyleSheet("font-size: 14px; font-weight: bold; color: #888; margin-left: 10px; margin-bottom: 5px;");
+    titleLabel->setProperty("overlayRole", "GroupTitle");
     
     QWidget *container = new QWidget();
     container->setObjectName("GroupContainer");
     container->setLayout(contentLayout);
 
-    groupLayout->addWidget(titleLabel);
+    groupLayout->addWidget(titleLabel, 0, Qt::AlignLeft);
     groupLayout->addWidget(container);
     
     return group;
@@ -125,14 +125,14 @@ QWidget* AccountPage::createGroup(const QString &title, QLayout *contentLayout) 
 QWidget* AccountPage::createSettingRow(const QString &id, const QString &icon, const QString &title, const QString &desc, QWidget *control) {
     QWidget *row = new QWidget();
     row->setObjectName("SettingRow");
-    row->setFixedHeight(60);
+    row->setFixedHeight(56);
     QHBoxLayout *layout = new QHBoxLayout(row);
-    layout->setContentsMargins(15, 10, 20, 10);
-    layout->setSpacing(15);
+    layout->setContentsMargins(14, 8, 18, 8);
+    layout->setSpacing(13);
     
     QLabel *iconLbl = new QLabel();
     iconLbl->setObjectName("SettingIcon");
-    iconLbl->setFixedSize(34, 34);
+    iconLbl->setFixedSize(32, 32);
     iconLbl->setAlignment(Qt::AlignCenter);
     iconLbl->setProperty("svgIcon", icon);
     
@@ -175,6 +175,7 @@ QWidget* AccountPage::createSettingRow(const QString &id, const QString &icon, c
         m_channelDescriptionLabel->setStyleSheet("color: #888; font-size: 12px;");
         layout->addWidget(m_channelDescriptionLabel);
     } else if (control) {
+        OverlayControlStyle::polishFormControl(control);
         layout->addWidget(control);
     }
     
@@ -203,6 +204,7 @@ void AccountPage::updateTexts() {
 
 void AccountPage::updateTheme() {
     bool isDark = ConfigManager::instance().isCurrentThemeDark();
+    setStyleSheet(OverlayControlStyle::pageStyleSheet(isDark));
                   
     QList<QLabel*> iconLabels = findChildren<QLabel*>("SettingIcon");
     for (QLabel* lbl : iconLabels) {

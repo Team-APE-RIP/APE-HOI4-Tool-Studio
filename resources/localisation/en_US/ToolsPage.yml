@@ -4,3 +4,8 @@ l_en_US:
   RequiresApp: "Requires App v%1"
   CurrentApp: "Current App v%2"
   MismatchWarning: "This may cause issues."
+  UninstallTool: "Uninstall"
+  OfficialToolProtected: "Official tools cannot be uninstalled."
+  UninstallToolTitle: "Uninstall Tool"
+  UninstallToolMessage: "Uninstall %1 and remove its files?"
+  UninstallToolFailedTitle: "Tool Uninstall Failed"

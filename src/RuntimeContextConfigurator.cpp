@@ -18,6 +18,9 @@
 #include <QDirIterator>
 #include <QFile>
 #include <QFileInfo>
+#include <QRegularExpression>
+
+#include <utility>
 
 namespace {
 
@@ -161,19 +164,26 @@ bool resolveEffectiveAbsolutePath(const QString& relativePath,
         return false;
     }
 
-    const QMap<QString, FileDetails> effectiveFiles = FileManager::instance().getEffectiveFiles();
-    const auto it = effectiveFiles.constFind(normalizedRelativePath);
-    if (it == effectiveFiles.constEnd()) {
+    FileDetails effectiveFile;
+    if (!FileManager::instance().getEffectiveFile(normalizedRelativePath, &effectiveFile)) {
         if (errorMessage) {
             *errorMessage = QString("Effective file does not exist: %1").arg(normalizedRelativePath);
         }
         return false;
     }
 
-    const QString absolutePath = QDir::cleanPath(it.value().absPath);
+    const QString absolutePath = QDir::cleanPath(effectiveFile.absPath);
     if (absolutePath.trimmed().isEmpty()) {
         if (errorMessage) {
             *errorMessage = QString("Effective file path is unavailable: %1").arg(normalizedRelativePath);
+        }
+        return false;
+    }
+
+    const QFileInfo absoluteInfo(absolutePath);
+    if (!absoluteInfo.exists() || !absoluteInfo.isFile()) {
+        if (errorMessage) {
+            *errorMessage = QString("Effective file no longer exists: %1").arg(normalizedRelativePath);
         }
         return false;
     }
@@ -198,6 +208,19 @@ PluginRuntimeContext::EffectiveFileSource mapPluginEffectiveFileSource(const QSt
     return PluginRuntimeContext::EffectiveFileSource::Unknown;
 }
 
+ToolRuntimeContext::EffectiveFileSource mapToolEffectiveFileSource(const QString& source) {
+    if (source.compare("Game", Qt::CaseInsensitive) == 0) {
+        return ToolRuntimeContext::EffectiveFileSource::Game;
+    }
+    if (source.compare("Mod", Qt::CaseInsensitive) == 0) {
+        return ToolRuntimeContext::EffectiveFileSource::Mod;
+    }
+    if (source.compare("DLC", Qt::CaseInsensitive) == 0) {
+        return ToolRuntimeContext::EffectiveFileSource::Dlc;
+    }
+    return ToolRuntimeContext::EffectiveFileSource::Unknown;
+}
+
 bool isToolWriteRootAllowed(ToolRuntimeContext::FileRoot root, QString* errorMessage) {
     if (root == ToolRuntimeContext::FileRoot::Mod) {
         return true;
@@ -209,13 +232,129 @@ bool isToolWriteRootAllowed(ToolRuntimeContext::FileRoot root, QString* errorMes
     return false;
 }
 
+ToolRuntimeContext::MatchingTextFilesResult readEffectiveTextFilesFromFileManager(const QString& relativeRoot,
+                                                                                  const QString& suffixFilter) {
+    const QMap<QString, FileDetails> effectiveFiles =
+        FileManager::instance().getEffectiveFiles(relativeRoot, suffixFilter);
+
+    ToolRuntimeContext::MatchingTextFilesResult result;
+    result.success = true;
+    result.entries.reserve(effectiveFiles.size());
+
+    for (auto it = effectiveFiles.constBegin(); it != effectiveFiles.constEnd(); ++it) {
+        const FileDetails& details = it.value();
+        if (details.absPath.trimmed().isEmpty()) {
+            continue;
+        }
+
+        QFile file(details.absPath);
+        if (!file.open(QIODevice::ReadOnly | QIODevice::Text)) {
+            continue;
+        }
+
+        ToolRuntimeContext::TextFileMatchEntry entry;
+        entry.relativePath = it.key();
+        entry.name = QFileInfo(it.key()).fileName();
+        entry.content = QString::fromUtf8(file.readAll());
+        result.entries.append(std::move(entry));
+    }
+
+    return result;
+}
+
+PluginRuntimeContext::MatchingTextFilesResult toPluginMatchingTextFilesResult(
+    const ToolRuntimeContext::MatchingTextFilesResult& runtimeResult
+) {
+    PluginRuntimeContext::MatchingTextFilesResult result;
+    result.success = runtimeResult.success;
+    result.errorMessage = runtimeResult.errorMessage;
+    result.entries.reserve(runtimeResult.entries.size());
+    for (const ToolRuntimeContext::TextFileMatchEntry& runtimeEntry : runtimeResult.entries) {
+        PluginRuntimeContext::TextFileMatchEntry entry;
+        entry.relativePath = runtimeEntry.relativePath;
+        entry.name = runtimeEntry.name;
+        entry.content = runtimeEntry.content;
+        result.entries.append(std::move(entry));
+    }
+    return result;
+}
+
 } // namespace
 
 void configureToolRuntimeContext() {
     ToolRuntimeContext& context = ToolRuntimeContext::instance();
 
-    context.setPluginBinaryPathResolver([](const QString& pluginName, QString* outPath, QString* errorMessage) {
-        return PluginManager::instance().getPluginBinaryPath(pluginName, outPath, errorMessage);
+    context.setMatchingTextFileReader([](ToolRuntimeContext::FileRoot root,
+                                         const QString& relativePath,
+                                         const QString& regexPattern,
+                                         bool recursive) {
+        QString absolutePath;
+        QString displayRelativePath;
+        QString errorMessage;
+        if (!resolveAuthorizedAbsolutePath(root, relativePath, &absolutePath, &displayRelativePath, &errorMessage)) {
+            return ToolRuntimeContext::MatchingTextFilesResult{false, {}, errorMessage};
+        }
+
+        const QFileInfo rootInfo(absolutePath);
+        if (!rootInfo.exists()) {
+            return ToolRuntimeContext::MatchingTextFilesResult{
+                false,
+                {},
+                QString("Directory does not exist: %1").arg(displayRelativePath)
+            };
+        }
+        if (!rootInfo.isDir()) {
+            return ToolRuntimeContext::MatchingTextFilesResult{
+                false,
+                {},
+                QString("Path is not a directory: %1").arg(displayRelativePath)
+            };
+        }
+
+        const QRegularExpression pattern(regexPattern);
+        if (!pattern.isValid()) {
+            return ToolRuntimeContext::MatchingTextFilesResult{
+                false,
+                {},
+                QString("Invalid regex pattern: %1").arg(pattern.errorString())
+            };
+        }
+
+        QList<ToolRuntimeContext::TextFileMatchEntry> entries;
+        const QDirIterator::IteratorFlags iteratorFlags = recursive
+            ? QDirIterator::Subdirectories
+            : QDirIterator::NoIteratorFlags;
+        QDirIterator iterator(
+            absolutePath,
+            QDir::NoDotAndDotDot | QDir::Files,
+            iteratorFlags
+        );
+
+        while (iterator.hasNext()) {
+            iterator.next();
+            const QFileInfo info = iterator.fileInfo();
+            const QString matchedRelativePath = cleanRelativePathForLogging(
+                QDir(absolutePath).relativeFilePath(info.absoluteFilePath())
+            );
+            if (!pattern.match(matchedRelativePath).hasMatch()) {
+                continue;
+            }
+
+            QFile file(info.absoluteFilePath());
+            if (!file.open(QIODevice::ReadOnly | QIODevice::Text)) {
+                continue;
+            }
+
+            ToolRuntimeContext::TextFileMatchEntry entry;
+            entry.relativePath = displayRelativePath.isEmpty()
+                ? matchedRelativePath
+                : cleanRelativePathForLogging(displayRelativePath + "/" + matchedRelativePath);
+            entry.name = info.fileName();
+            entry.content = QString::fromUtf8(file.readAll());
+            entries.append(entry);
+        }
+
+        return ToolRuntimeContext::MatchingTextFilesResult{true, entries, QString()};
     });
 
     context.setBinaryFileReader([](ToolRuntimeContext::FileRoot root, const QString& relativePath) {
@@ -286,6 +425,26 @@ void configureToolRuntimeContext() {
             QString::fromUtf8(binaryResult.content),
             QString()
         };
+    });
+    context.setEffectiveFileEnumerator([](const QString& relativeRoot, const QString& suffixFilter) {
+        const QMap<QString, FileDetails> effectiveFiles =
+            FileManager::instance().getEffectiveFiles(relativeRoot, suffixFilter);
+
+        ToolRuntimeContext::EffectiveFileListResult result;
+        result.success = true;
+
+        for (auto it = effectiveFiles.constBegin(); it != effectiveFiles.constEnd(); ++it) {
+            ToolRuntimeContext::EffectiveFileEntry entry;
+            entry.logicalPath = it.key();
+            entry.source = mapToolEffectiveFileSource(it.value().sourceString());
+            entry.lastModifiedMs = it.value().lastModifiedMs;
+            result.entries.append(entry);
+        }
+
+        return result;
+    });
+    context.setEffectiveTextFilesReader([](const QString& relativeRoot, const QString& suffixFilter) {
+        return readEffectiveTextFilesFromFileManager(relativeRoot, suffixFilter);
     });
 
     context.setBinaryFileWriter([](ToolRuntimeContext::FileRoot root, const QString& relativePath, const QByteArray& content) {
@@ -536,20 +695,26 @@ void configurePluginRuntimeContext() {
         };
     });
 
-    context.setEffectiveFileEnumerator([]() {
-        const QMap<QString, FileDetails> effectiveFiles = FileManager::instance().getEffectiveFiles();
+    context.setEffectiveFileEnumerator([](const QString& relativeRoot, const QString& suffixFilter) {
+        const QMap<QString, FileDetails> effectiveFiles =
+            FileManager::instance().getEffectiveFiles(relativeRoot, suffixFilter);
 
         PluginRuntimeContext::EffectiveFileListResult result;
         result.success = true;
-        result.entries.reserve(effectiveFiles.size());
 
         for (auto it = effectiveFiles.constBegin(); it != effectiveFiles.constEnd(); ++it) {
             PluginRuntimeContext::EffectiveFileEntry entry;
             entry.logicalPath = it.key();
             entry.source = mapPluginEffectiveFileSource(it.value().sourceString());
+            entry.lastModifiedMs = it.value().lastModifiedMs;
             result.entries.append(entry);
         }
 
         return result;
+    });
+    context.setEffectiveTextFilesReader([](const QString& relativeRoot, const QString& suffixFilter) {
+        return toPluginMatchingTextFilesResult(
+            readEffectiveTextFilesFromFileManager(relativeRoot, suffixFilter)
+        );
     });
 }
